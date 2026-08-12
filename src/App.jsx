@@ -1,5 +1,5 @@
 // ============================================================================
-// GFPR — Global Food Plasmidome RESOURCE
+// GFPR — Global Food Plasmidome Resource
 // ============================================================================
 // WHAT THIS FILE IS
 // Frontend-only prototype for the GFPR (food-derived plasmidome database)
@@ -9,23 +9,21 @@
 // backend will be connected to these same components later.
 //
 // REVISION NOTES (this pass)
-//   - GlobalStyles now resets html/body/#root (fixes the black margins that
-//     showed up on wide screens — that was the Vite default #root { max-width:
-//     1280px } fighting this layout) and hides the tab-bar's scrollbar.
-//   - FONT_MONO switched from Courier New to IBM Plex Mono (loaded in
-//     GlobalStyles) — same role (data labels, IDs, code-like content), less
-//     of a generic "AI demo" look.
-//   - About page intro paragraph is now centered on the page with justified
-//     line edges.
-//   - World map now draws a real Natural Earth / Wikimedia Commons blank map
-//     (CC0) instead of hand-drawn blobs, and every sample dot sits at its
-//     country's real lat/long.
-//   - Sample detail page: the boxed pill/badge meta line is gone. Country,
-//     category, host, etc. now live under the FASTA preview as a plain
-//     "Label: value" list inside one card, followed by the Annotation
-//     Summary (bold short code, hits listed underneath in regular weight).
-//   - Masthead hero now points at the real TEM plasmid photo you dropped in
-//     public/images.
+//   - Masthead title now reads "Global Food Plasmidome Resource" (was
+//     "...Catalog") to match the rest of the site.
+//   - Removed the "A plain-language outline of the paper..." subtitle line
+//     under the About page's main heading.
+//   - World map: scrolling to zoom no longer scrolls the page underneath it.
+//     React's onWheel is passive by default, so preventDefault() silently
+//     did nothing before — the zoom handler is now attached directly to the
+//     SVG node with a non-passive native listener (see the useEffect in
+//     WorldHeatMap), which is the actual fix.
+//   - World map card now spans the full width of the grid (previously half
+//     width, which is why it looked small) and got a taller viewport.
+//   - All text inputs/textareas (Data Access search bar, Contact form) are
+//     forced to a light background — some browsers render native form
+//     controls with a dark background under OS dark mode unless you say
+//     otherwise, which is what was happening.
 //
 // PAGE STRUCTURE (top to bottom of the app shell):
 //   Masthead   -> Full-width, left-aligned, all-caps title band, over a
@@ -38,11 +36,11 @@
 //     2) About GFPR   -> Plain-language paper summary, a full-width overview
 //                         stats strip, then four interactive figures: a
 //                         RADIAL phylogenetic tree, category share bars, a
-//                         circular "Figure A" chord diagram, and a zoomable
-//                         world sample map. Every figure is clickable —
-//                         selecting a branch / bar / ribbon / country surfaces
-//                         a "See samples" link that jumps to Data Access
-//                         pre-filtered accordingly.
+//                         circular "Figure A" chord diagram, and a zoomable,
+//                         full-width world sample map. Every figure is
+//                         clickable — selecting a branch / bar / ribbon /
+//                         country surfaces a "See samples" link that jumps
+//                         to Data Access pre-filtered accordingly.
 //     3) Data Access  -> Category / type / subtype / fermented / country /
 //                         date / annotation filters as side-by-side dropdown
 //                         chips, a results table, and a per-sample detail page.
@@ -73,7 +71,7 @@
 //             dataset's own shape rather than a stock template chart.
 // ============================================================================
 
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Download,
   UploadCloud,
@@ -120,9 +118,8 @@ const COLORS = {
 
 const FONT_BODY = "Calibri, 'Segoe UI', Arial, Helvetica, sans-serif";
 const FONT_DISPLAY = FONT_BODY;
-// Was Courier New — swapped for IBM Plex Mono (loaded in GlobalStyles below),
-// a purpose-built data/code face instead of the generic "AI demo" typewriter
-// look. Still used for IDs, table values, stats, and the FASTA block.
+// IBM Plex Mono (loaded in GlobalStyles below) — used for IDs, table values,
+// stats, and the FASTA block.
 const FONT_MONO = "'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace";
 
 // Small shared utility
@@ -132,18 +129,18 @@ const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 // 1b) GLOBAL STYLES
 // ============================================================================
 // Fixes, in order:
-//  1. The Vite/CRA default `#root { max-width: 1280px; margin: 0 auto;
-//     padding: 2rem; }` is what was leaving solid black margins once the
-//     window got wider than that — this resets html/body/#root to fill the
-//     viewport and paints a very faint teal→cream gradient behind everything
-//     instead of a flat/default background, so there's never a hard edge.
+//  1. Resets html/body/#root to fill the viewport (no dark margins outside
+//     the content) and paints a very faint teal→cream gradient behind
+//     everything instead of a flat/default background.
 //  2. Loads IBM Plex Mono (see FONT_MONO above).
 //  3. Hides the horizontal scrollbar on the tab bar (.no-scrollbar) — the
 //     bar still scrolls with a swipe/drag on narrow screens, it just no
 //     longer shows the scrollbar track.
-// If your project already has its own rules for #root in index.css / App.css
-// (very common in the default Vite template), you can delete them — this
-// covers it, with !important so it always wins regardless of load order.
+//  4. Forces every native text input / textarea / select to render with a
+//     light background and dark text (color-scheme: light). Without this,
+//     browsers on a dark-mode OS render plain, unstyled form controls with a
+//     dark background — that's what was making the search bar and the
+//     Contact form fields look grey/black.
 function GlobalStyles() {
   return (
     <style>{`
@@ -165,6 +162,12 @@ function GlobalStyles() {
       }
       .no-scrollbar::-webkit-scrollbar {
         display: none;
+      }
+
+      input, textarea, select {
+        background-color: #ffffff;
+        color: ${COLORS.ink};
+        color-scheme: light;
       }
     `}</style>
   );
@@ -386,7 +389,7 @@ function Masthead() {
       />
       <div className="relative z-10 w-full px-6 md:px-12 pt-16 pb-14 md:pt-20 md:pb-16 text-left">
         <h1 className="uppercase text-5xl md:text-7xl font-extrabold leading-[1.02] tracking-tight" style={{ fontFamily: FONT_DISPLAY, color: "#fff" }}>
-          Global Food<br />Plasmidome Catalog
+          Global Food<br />Plasmidome Resource
         </h1>
         <p className="mt-4 text-sm md:text-base tracking-wide" style={{ color: COLORS.paper, fontFamily: FONT_BODY }}>
           Open Food-Derived Plasmidome Database
@@ -877,7 +880,7 @@ function RibbonChord({ onSeeSamples }) {
 // BlankMap-Equirectangular.svg). Its native viewBox is exactly 360×180 units,
 // with x = longitude + 180 and y = 90 − latitude — so sample points below are
 // plotted straight from each country's real (approximate) lat/long instead of
-// a hand-drawn coordinate system, which is why they now land on the actual
+// a hand-drawn coordinate system, which is why they land on the actual
 // landmass. If you'd rather self-host it, download the SVG into
 // public/images/ and swap WORLD_MAP_URL for the local path.
 const WORLD_MAP_URL = "https://commons.wikimedia.org/wiki/Special:FilePath/BlankMap-Equirectangular.svg";
@@ -925,7 +928,22 @@ function WorldHeatMap({ onSeeSamples }) {
   const zoomBy = (factor) => setZoom((z) => clamp(z * factor, 1, 5));
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
-  const onWheel = (e) => { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
+  // Scroll-to-zoom, attached as a real (non-passive) DOM listener.
+  // React's onWheel prop is passive by default, so calling preventDefault()
+  // from a plain JSX onWheel handler is silently ignored by the browser and
+  // the page keeps scrolling underneath the map. Binding the listener
+  // manually with { passive: false } is what actually stops that.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const handleWheel = (e) => {
+      e.preventDefault();
+      setZoom((z) => clamp(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 1, 5));
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
+
   const onPointerDown = (e) => {
     if (zoom <= 1) return;
     dragRef.current = { startX: e.clientX, startY: e.clientY, panX: vx, panY: vy };
@@ -954,7 +972,7 @@ function WorldHeatMap({ onSeeSamples }) {
   const clearSelection = () => { setActive(null); setLocked(false); };
 
   return (
-    <div className="rounded-2xl p-5" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
+    <div className="rounded-2xl p-5 lg:col-span-2" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <Globe2 size={16} style={{ color: COLORS.darkTeal }} />
@@ -992,8 +1010,7 @@ function WorldHeatMap({ onSeeSamples }) {
         ref={svgRef}
         viewBox={`${vx} ${vy} ${viewW} ${viewH}`}
         className="w-full"
-        style={{ maxHeight: 380, cursor: zoom > 1 ? "grab" : "default", touchAction: "none" }}
-        onWheel={onWheel}
+        style={{ maxHeight: 560, cursor: zoom > 1 ? "grab" : "default", touchAction: "none" }}
         onMouseDown={onPointerDown}
         onMouseMove={onPointerMove}
         onMouseUp={onPointerUp}
@@ -1063,10 +1080,7 @@ function AboutPage({ onNavigate }) {
   return (
     <div style={{ backgroundColor: COLORS.paper }}>
       <section className="max-w-6xl mx-auto px-6 py-16">
-        <SectionTitle
-          title="What is GFPR, and why does it matter?"
-          subtitle="A plain-language outline of the paper follows below; see the full article for technical detail and references."
-        />
+        <SectionTitle title="What is GFPR, and why does it matter?" />
 
         {/* Centered, justified intro block */}
         <div
@@ -1311,7 +1325,7 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search ID, type, subtype, host..."
               className="w-full text-sm pl-8 pr-3 py-2.5 rounded-xl outline-none"
-              style={{ border: `1.5px solid ${COLORS.line}`, fontFamily: FONT_BODY }}
+              style={{ border: `1.5px solid ${COLORS.line}`, fontFamily: FONT_BODY, backgroundColor: "#fff", color: COLORS.ink }}
             />
           </div>
         </div>
@@ -1682,20 +1696,20 @@ function ContactPage({ onMockAction }) {
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Full Name</label>
-                <input required value={form.name} onChange={update("name")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${COLORS.line}` }} />
+                <input required value={form.name} onChange={update("name")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${COLORS.line}`, backgroundColor: "#fff", color: COLORS.ink }} />
               </div>
               <div>
                 <label className="text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Email</label>
-                <input required type="email" value={form.email} onChange={update("email")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${COLORS.line}` }} />
+                <input required type="email" value={form.email} onChange={update("email")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${COLORS.line}`, backgroundColor: "#fff", color: COLORS.ink }} />
               </div>
             </div>
             <div>
               <label className="text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Subject</label>
-              <input value={form.subject} onChange={update("subject")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${COLORS.line}` }} />
+              <input value={form.subject} onChange={update("subject")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${COLORS.line}`, backgroundColor: "#fff", color: COLORS.ink }} />
             </div>
             <div>
               <label className="text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Message</label>
-              <textarea required rows={5} value={form.message} onChange={update("message")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none resize-none" style={{ border: `1px solid ${COLORS.line}` }} />
+              <textarea required rows={5} value={form.message} onChange={update("message")} className="w-full mt-1 text-sm px-3 py-2 rounded-lg outline-none resize-none" style={{ border: `1px solid ${COLORS.line}`, backgroundColor: "#fff", color: COLORS.ink }} />
             </div>
             <button type="submit" className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: COLORS.orange }}>
               <Send size={15} /> Send
