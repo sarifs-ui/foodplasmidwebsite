@@ -39,10 +39,10 @@ If either command fails, install Node.js from the link above and try again.
 
 1. **Clone the repository**
 
-   ```bash
-  git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
-  cd foodplasmidwebsite
-   ```
+```bash
+   git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
+   cd foodplasmidwebsite
+```
 
 2. **Install dependencies**
 
