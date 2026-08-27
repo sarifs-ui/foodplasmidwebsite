@@ -1,128 +1,279 @@
 # GFPR — Global Food Plasmidome Resource
 
 An open, browsable catalog of plasmid data mined from food-derived metagenomic
-samples — antibiotic-resistance genes, enzymes, and other functional
-annotations, searchable by food category, country, host organism, and more.
+samples — antibiotic-resistance genes, CAZymes, CRISPR-Cas systems, antimicrobial
+peptides, and more — searchable and downloadable by food category, country, host
+organism, fermentation status, and annotation type.
 
-> **Status:** frontend-only prototype. All data on the site (samples,
-> counts, FASTA sequences, annotation hits) is **mock data** for UI/UX
-> review. No backend or real database is connected yet.
+> **Status:** active development. The frontend is fully wired to a real backend;
+> metadata filtering and CSV/zip export work with real data. Raw sequencing files
+> (FASTA + assembly outputs) are hosted on Zenodo, linked from the **Raw Data**
+> tab. The **Analysis** feature is not yet available.
 
-## What's in this repo
+---
 
-- A single-page React app (`src/App.jsx`) with five views — Home, About
-  GFPR, Data Access, Analysis, and Contact — navigated with in-app state
-  (no router).
-- Built with **React + Vite** and styled with **Tailwind CSS**.
-- Icons from `lucide-react` and `react-icons`.
-- Images referenced by the app live in `public/images/`.
+## Architecture overview
+
+```
+frontend/   React + Vite + Tailwind — all UI lives in src/App.jsx
+backend/    Node.js + Express — REST API, serves filtered data and zip exports
+            ├── data/gfpr.json          main sample metadata (from all_data.xlsx)
+            ├── data/gfpr.db            annotation tables (SQLite, from TSV files)
+            └── data/raw/               source TSV files for import scripts
+```
+
+The two parts run as separate processes and talk over HTTP
+(`VITE_API_BASE`, default `http://localhost:4000`). Both must be running
+locally for the full site to work.
+
+### Data sources
+
+| File | Table / use | Tool |
+|---|---|---|
+| `combined_amr.tsv` | `amr` | AMRFinderPlus + RGI |
+| `cazyme.tsv` | `cazyme` | run_dbCAN |
+| `master_gene_table_cgc.tsv` | `cgc` | easy_CGC |
+| `cctyper.tsv` | `crispr_cas` | CCTyper |
+| `macrel_amp.tsv` | `amp` | Macrel |
+| `pfam_ko/*.tsv` (17 files) | `pfam_ko` | eggNOG-mapper |
+| `hotspot.tsv` | `host_taxonomy` | PlasmerFlow |
+| `all_data.xlsx` | `gfpr.json` (main metadata) | — |
+
+---
 
 ## Requirements
 
-You only need two things installed:
+- **[Node.js](https://nodejs.org/) 18 or newer** (LTS recommended — installs npm automatically)
+- A terminal (PowerShell or Command Prompt on Windows, Terminal on macOS/Linux)
 
-- **[Node.js](https://nodejs.org/)** — version 18 or newer (LTS recommended).
-  Installing Node also installs **npm** automatically.
-- A terminal (Terminal on macOS/Linux, PowerShell or Command Prompt on
-  Windows).
-
-To check what you already have, open a terminal and run:
+Check what you have:
 
 ```bash
 node -v
 npm -v
 ```
 
-If either command fails, install Node.js from the link above and try again.
+---
 
-## Running it locally
+## Running locally (first time)
 
-1. **Clone the repository**
-
-```bash
-   git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
-   cd foodplasmidwebsite
-```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-   This reads `package.json` and downloads everything the project needs into
-   a local `node_modules/` folder. It can take a minute or two the first
-   time — that's normal.
-
-3. **Start the dev server**
-
-   ```bash
-   npm run dev
-   ```
-
-   The terminal will print a local address, typically:
-
-   ```
-   Local:   http://localhost:5173/
-   ```
-
-   Open that address in your browser. The site supports hot-reload, so any
-   code change shows up instantly without restarting the server.
-
-4. **Stop the server** anytime with `Ctrl + C` in the terminal.
-
-That's it — no environment variables, API keys, or database setup are
-required, since the app runs entirely on mock data in the browser.
-
-### Optional: production build
-
-If you want to generate a static, deployable build instead of the dev
-server:
+### 1 — Backend
 
 ```bash
-npm run build      # outputs to dist/
-npm run preview    # serve that build locally to sanity-check it
+cd backend
+npm install
 ```
+
+Copy `.env.example` to `.env` and adjust paths if needed (defaults work
+out of the box for the standard folder layout):
+
+```bash
+cp .env.example .env
+```
+
+**Import the main metadata** (needs `all_data.xlsx` in `backend/data/raw/`):
+
+```bash
+npm run import-data
+```
+
+**Import annotation tables** (needs the TSV files in `backend/data/raw/`
+and `backend/data/raw/pfam_ko/` — see `backend/data/raw/README.md` for
+the exact file list):
+
+```bash
+npm run import-annotations
+```
+
+Both import commands are safe to re-run; they overwrite the previous data.
+Once done, start the API server:
+
+```bash
+npm run dev        # http://localhost:4000
+```
+
+You should see:
+
+```
+GFPR backend http://localhost:4000 üzerinde çalışıyor
+```
+
+### 2 — Frontend
+
+Open a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
+```
+
+Open `http://localhost:5173` in your browser.
+
+---
+
+## Running locally (subsequent times)
+
+You only need to re-run the import scripts when the source data changes.
+For day-to-day development:
+
+```bash
+# terminal 1
+cd backend && npm run dev
+
+# terminal 2
+cd frontend && npm run dev
+```
+
+---
 
 ## Project structure
 
 ```
 .
-├── public/
-│   └── images/        # photos used by the masthead and home page cards
-├── src/
-│   ├── App.jsx         # the entire app — all pages/components live here
-│   └── ...              # standard Vite/React entry files (main.jsx, index.css, etc.)
-├── package.json
-└── README.md
+├── backend/
+│   ├── src/
+│   │   ├── app.js                       Express app (routes mounted here)
+│   │   ├── server.js                    entry point
+│   │   ├── config/
+│   │   │   ├── store.js                 reads gfpr.json (main metadata)
+│   │   │   ├── db.js                    SQLite connection (annotation tables)
+│   │   │   ├── countries.js             ISO3 → name + centroid map
+│   │   │   └── rawDataLinks.json        Zenodo links by category / country
+│   │   ├── controllers/
+│   │   │   ├── samplesController.js     list + detail
+│   │   │   ├── filtersController.js     filter chip options
+│   │   │   ├── statsController.js       overview, charts, taxonomy, map
+│   │   │   ├── downloadsController.js   zip export (metadata + annotations)
+│   │   │   └── rawDataController.js     Zenodo link lookup
+│   │   ├── routes/
+│   │   │   ├── samples.js
+│   │   │   ├── stats.js
+│   │   │   ├── downloads.js
+│   │   │   ├── rawData.js
+│   │   │   └── mock.js                  contact form (mock email)
+│   │   ├── scripts/
+│   │   │   ├── importExcel.js           all_data.xlsx → gfpr.json
+│   │   │   └── importAllData.js         TSV files → gfpr.db (SQLite)
+│   │   └── utils/
+│   │       └── csv.js                   lightweight CSV serialiser
+│   ├── data/
+│   │   ├── raw/                         source files (not committed if large)
+│   │   │   ├── README.md                exact file list + column notes
+│   │   │   └── pfam_ko/                 17 category TSV files
+│   │   ├── gfpr.json                    generated by import-data
+│   │   └── gfpr.db                      generated by import-annotations
+│   ├── .env.example
+│   └── package.json
+│
+└── frontend/
+    ├── public/
+    │   └── images/                      masthead + home-card photos
+    ├── src/
+    │   └── App.jsx                      entire frontend (all pages/components)
+    └── package.json
 ```
 
-## Notes for reviewers
+---
 
-- Nothing here writes to a real backend — filters, downloads, the contact
-  form, and the "Analysis" upload are all mocked (you'll see a toast
-  notification instead of an actual file download or email send).
-- The world map on the **About GFPR** page uses a public-domain basemap
-  (Natural Earth data via [Wikimedia
-  Commons](https://commons.wikimedia.org/wiki/File:BlankMap-Equirectangular.svg),
-  CC0) — no API key or attribution payment needed, it's loaded directly by
-  URL.
-- If images don't appear, confirm the files referenced in `src/App.jsx`
-  (search for `HERO_IMAGE_URL` and `HOME_CARDS`) actually exist under
-  `public/images/` with matching filenames — filenames are case-sensitive.
+## API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/health` | liveness check |
+| GET | `/api/samples` | paginated + filtered sample list |
+| GET | `/api/samples/filters` | available filter values |
+| GET | `/api/samples/:id` | single sample detail + annotation hit counts |
+| GET | `/api/stats/overview` | headline numbers |
+| GET | `/api/stats/category-share` | % breakdown for bar chart |
+| GET | `/api/stats/annotation-flow` | category → annotation hit counts (chord diagram) |
+| GET | `/api/stats/map` | per-country counts + dominant category |
+| GET | `/api/stats/taxonomy` | host phylogeny tree (Phylum → Family) |
+| POST | `/api/downloads/export` | zip of metadata CSV + selected annotation CSVs |
+| GET | `/api/raw-data/links` | Zenodo links by category / country |
+| POST | `/api/mock/contact` | contact form (logged, not emailed) |
+
+---
+
+## Adding Zenodo links
+
+When a category or country zip is uploaded to Zenodo, add its link to
+`backend/src/config/rawDataLinks.json`:
+
+```json
+{
+  "byCategory": {
+    "dairy":   "https://zenodo.org/records/XXXX/files/gfpr_dairy.zip",
+    "alcohol": "https://zenodo.org/records/XXXX/files/gfpr_alcohol.zip"
+  },
+  "byCountry": {
+    "TUR": "https://zenodo.org/records/YYYY/files/gfpr_TUR.zip"
+  }
+}
+```
+
+Keys in `byCategory` must match the `key` values in the `CATEGORIES` array
+in `frontend/src/App.jsx` (e.g. `"dairy"`, `"ferm_grains"`). Keys in
+`byCountry` must match the country codes in the main metadata (e.g.
+`"TUR"`, `"USA"`). No server restart is needed — the file is read fresh on
+every request.
+
+---
+
+## Environment variables (backend)
+
+Defined in `.env` (copy from `.env.example`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `4000` | API server port |
+| `DB_PATH` | `./data/gfpr.json` | main metadata file |
+| `ANNOTATIONS_DB_PATH` | `./data/gfpr.db` | SQLite annotation database |
+| `EXCEL_PATH` | `./data/raw/all_data.xlsx` | source Excel for import-data |
+| `RAW_DATA_DIR` | `./data/raw` | folder scanned by import-annotations |
+
+Frontend talks to the backend via `VITE_API_BASE` (set in
+`frontend/.env.local` if the backend runs on a non-default port):
+
+```
+VITE_API_BASE=http://localhost:4000
+```
+
+---
+
+## Optional: production build (frontend)
+
+```bash
+cd frontend
+npm run build      # outputs to dist/
+npm run preview    # serve the build locally to sanity-check
+```
+
+The `dist/` folder is a fully static bundle; it can be served from any
+static host (Nginx, GitHub Pages, Cloudflare Pages, etc.) as long as
+`VITE_API_BASE` is set to the deployed backend URL at build time.
+
+---
 
 ## Troubleshooting
 
 | Problem | Likely fix |
 |---|---|
-| `npm install` fails | Make sure Node.js is 18+ (`node -v`). Delete `node_modules/` and `package-lock.json`, then retry. |
-| Port 5173 is already in use | Vite will automatically try the next free port and print it — just use the URL it shows. |
-| Page loads blank / console errors about missing modules | Run `npm install` again — a dependency likely didn't finish installing. |
-| Images are broken (broken-image icons) | Check that the exact filenames in `public/images/` match what `src/App.jsx` expects (see above). |
+| `npm install` fails | Confirm Node ≥ 18 (`node -v`). Delete `node_modules/` and `package-lock.json`, retry. |
+| `better-sqlite3` build error on Windows | Install the Visual Studio C++ build tools: run `npm install --global windows-build-tools` in an admin PowerShell, then retry. |
+| Backend starts but `/api/samples` returns empty | Run `npm run import-data` first — `gfpr.json` does not exist yet. |
+| `/api/stats/taxonomy` returns 503 | Run `npm run import-annotations` — `gfpr.db` has not been populated yet. |
+| Download zip is empty / annotations missing | Same as above — the relevant table does not exist in `gfpr.db`. |
+| Port 4000 already in use | Another process (possibly a previous backend run) is still alive. Kill it: `netstat -ano \| findstr :4000`, then `taskkill /PID <id> /F`. |
+| Frontend port 5173 in use | Vite picks the next free port automatically — use the URL it prints. |
+| Images broken | Confirm filenames in `public/images/` match exactly (case-sensitive) what `src/App.jsx` references (`HERO_IMAGE_URL`, `HOME_CARDS`). |
+| Map points don't appear | Country codes in the data must be ISO 3166-1 alpha-3. Add missing codes to `backend/src/config/countries.js`. |
+
+---
 
 ## License / Credits
 
-- App code: add a license here if you'd like this to be reusable (e.g. MIT).
-- Sample/masthead photography: supplied by the project team.
-- World map basemap: Natural Earth data, via Wikimedia Commons, public
-  domain (CC0).
+- App code: to be decided.
+- World map basemap: Natural Earth data via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:BlankMap-Equirectangular.svg), CC0 (public domain).
+- Sample photography: supplied by the project team.
+- Raw sequencing data: see Zenodo record (link to be added upon publication).
