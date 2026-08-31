@@ -4,9 +4,7 @@ An open, browsable catalog of plasmid data mined from food-derived metagenomic
 samples — antibiotic-resistance genes, enzymes, and other functional
 annotations, searchable by food category, country, host organism, and more.
 
-> **Status:** frontend-only prototype. All data on the site (samples,
-> counts, FASTA sequences, annotation hits) is **mock data** for UI/UX
-> review. No backend or real database is connected yet.
+
 
 ## What's in this repo
 
