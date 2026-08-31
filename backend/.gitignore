@@ -1,3 +1,6 @@
 node_modules/
 .env
 data/gfpr.json
+backend/data/*.tsv
+backend/data/*.db
+backend/data/pfam_ko/

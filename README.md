@@ -84,6 +84,19 @@ npm run build      # outputs to dist/
 npm run preview    # serve that build locally to sanity-check it
 ```
 
+## Backend Data Setup
+
+The `backend data` folder is stored separately on Google Drive to save space. To use it locally:
+
+1. **Download the folder** from here:  
+   [Google Drive: Backend Data](https://drive.google.com/drive/folders/1AaSt8wzpDxTFCcZCJ3rjkLW4vA7i6wbi?usp=sharing)
+
+2. **Create a `backend data` folder** in your project root (same level as `package.json`)
+
+3. **Extract the downloaded files** into that folder
+
+After this, the backend data will be available for local development.
+
 ## Project structure
 
 ```

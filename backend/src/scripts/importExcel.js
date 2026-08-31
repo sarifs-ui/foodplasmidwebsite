@@ -10,7 +10,7 @@ import path from "node:path";
 import "dotenv/config";
 import { readAll, writeAll, DB_FILE_PATH } from "../config/store.js";
 
-const EXCEL_PATH = process.env.EXCEL_PATH || "./data/raw/all_data.xlsx";
+const EXCEL_PATH = process.env.EXCEL_PATH || "./data/All_Data.csv";
 const SHEET_NAME = process.env.EXCEL_SHEET_NAME || null;
 
 const HEADER_MAP = {
@@ -24,7 +24,12 @@ const HEADER_MAP = {
   category: "category",
   type: "type",
   subtype: "sub_type",
+  // "Fermented(F)/Non_Fermented(NF)" — normalizeHeader parantez içini siler
+  // sonra alfasayısal olmayan karakterleri siler => "fermentednonfermented"
+  // Eski varyant da korunuyor (başlık formatı değişirse diye).
+  fermentednonfermented: "fermented_raw",
   fermentedfnonfermentednf: "fermented_raw",
+  fermented: "fermented_raw",
   country: "country",
   year: "year",
   databaseorigin: "database_origin",
@@ -122,6 +127,12 @@ function run() {
           // amr, amp, cazyme, cgc, crispr_cas, acp, pfam_ko, hotspot -> metin listesi
           rec[field] = toTextOrNull(val);
         }
+      }
+      // NOTE: Tüm anotasyon dosyalarındaki ID'ler aslında Excel'deki Run_ID ile 
+      // eşleşiyor. Bu nedenle veritabanındaki ana anahtarımız (sample_id) her 
+      // zaman Run_ID olmalıdır.
+      if (rec.run_id) {
+        rec.sample_id = rec.run_id;
       }
       return rec;
     })

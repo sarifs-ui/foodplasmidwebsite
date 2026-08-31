@@ -8,71 +8,33 @@
 // visual identity, and interactive UI wired up with mock data. The real
 // backend will be connected to these same components later.
 //
-// REVISION NOTES (this pass)
-//   - About GFPR: the intro paragraph block used to be centered
-//     (`max-w-3xl mx-auto`, justified text) while the "What is GFPR..."
-//     heading above it is left-aligned — that mismatch is what read as
-//     "the title is on the left but the text is in the middle." The intro
-//     block is now left-aligned to match the heading, and the paper-summary
-//     copy itself has been expanded (more of the introduction + dataset
-//     numbers from the manuscript) rather than staying at three short
-//     paragraphs.
-//   - Data Access results table: removed the small colored dot in front of
-//     the Category cell on every row — category is already readable as
-//     plain text, and the swatch didn't carry extra information there.
-//   - Data Access search bar: it previously only matched against ID, type,
-//     subtype, and host, so typing a country or category name (e.g.
-//     "Türkiye" or "Dairy") returned nothing even though those are visible
-//     columns. It now also matches country and category, and the
-//     placeholder text reflects that.
-//
-// PAGE STRUCTURE (top to bottom of the app shell):
-//   Masthead   -> Full-width, left-aligned, all-caps title band, over a
-//                 real plasmid micrograph in a teal→orange duotone fade.
-//   Tab bar    -> Plain text tabs, no icons, sits directly under the
-//                 masthead and stays pinned while the page scrolls.
-//   Page body  -> One of six views:
-//     1) Home         -> Mission line + four large, single-column link
-//                         panels (About / Data / Analysis / Contact).
-//     2) About GFPR   -> Plain-language paper summary, a full-width overview
-//                         stats strip, then four interactive figures: a
-//                         RADIAL phylogenetic tree, category share bars, a
-//                         circular "Figure A" chord diagram, and a zoomable,
-//                         full-width world sample map. Every figure is
-//                         clickable — selecting a branch / bar / ribbon /
-//                         country surfaces a "See samples" link that jumps
-//                         to Data Access pre-filtered accordingly.
-//     3) Data Access  -> Category / type / subtype / fermented / country /
-//                         date / annotation filters as side-by-side dropdown
-//                         chips, a results table, and a per-sample detail page.
-//                         Can arrive pre-filtered from an About-page figure.
-//     4) Sample detail-> Opened by clicking a row: a FASTA preview, then one
-//                         card with General Info (label: value lines) and
-//                         Annotation Summary (bold code + hit list) stacked
-//                         inside it, and a single Downloads panel with
-//                         checkboxes (all checked by default) + one button.
-//     5) Analysis     -> FASTA/GFA-style upload dropzone; mock results show
-//                         the 10 closest samples plus a predicted origin.
-//     6) Contact      -> Contact form (mock submit) + direct team emails.
-//
-// DESIGN SYSTEM
-//   Color  -> Orange carries primary actions and active nav; teal stays for
-//             structure and body headings; BERRY breaks up the orange/teal
-//             duo across category swatches, chart accents, and section
-//             labels. The masthead itself was intentionally pulled back from
-//             a flat, saturated orange toward a teal→orange duotone so it
-//             reads as calmer and more photographic. The page background is
-//             a very faint teal→cream gradient rather than a flat white, so
-//             there's never a hard black edge outside the content.
-//   Type   -> A single plain system-sans stack (Calibri/Segoe/Arial) for
-//             body and display alike. Data labels (accession IDs, table
-//             values, the FASTA block) use IBM Plex Mono.
-//   Layout -> Masthead, sticky text-only tab bar, then content.
-//   Signature -> The circular "Figure A" chord diagram is drawn from the
-//             dataset's own shape rather than a stock template chart.
+// REVISION NOTES (this pass — frontend-only, no backend touched)
+//   - Analysis page removed entirely (nav item, home card, routing branch).
+//     A new "Raw Data" tab takes its place in the nav: a By Category / By
+//     Country toggle backed by GET /api/raw-data/links, rendered as a
+//     simple grid of buttons that open the matching Zenodo record in a new
+//     tab.
+//   - Sample detail page: the mock "FASTA Preview" box is gone. In its
+//     place, the right-hand column now always shows a "Download Raw Files
+//     (Zenodo)" button (above the existing Downloads card) that links to
+//     GET /api/raw-data/links's byCategory[record.category].
+//   - Figure A (RibbonChord / buildChordLayout): category block angular
+//     width still reflects each category's absolute total hit count
+//     (unchanged), but the ribbon thickness leaving a category block is now
+//     explicitly computed as that category's internal percentage share
+//     (0–100%) rather than an absolute count, so small categories always
+//     fill their own block edge-to-edge instead of being visually crushed.
+//   - RadialTaxonomy: mock CLADO_NODES/PHYLA constants removed; the
+//     component now fetches GET /api/stats/taxonomy on mount and follows
+//     the same loading/error pattern as CategoryBarChart / WorldHeatMap.
+//   - DataAccessPage: the "Metadata (CSV)" and "Download Files" toolbar
+//     buttons now POST to /api/downloads/export and stream back a real
+//     blob download instead of calling onMockAction.
+//   - Everything else (colors, fonts, HomePage/AboutPage body copy,
+//     CategoryBarChart, WorldHeatMap, small UI pieces) is untouched.
 // ============================================================================
 
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   Download,
   UploadCloud,
@@ -95,8 +57,11 @@ import {
   ZoomOut,
   RotateCcw,
   ArrowRight,
+  Maximize2,
+  RotateCcw as ResetIcon,
 } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
+import { ComposableMap, Geographies, Geography, ZoomableGroup } from "react-simple-maps";
 
 // ============================================================================
 // 0) API LAYER
@@ -125,6 +90,27 @@ async function apiPost(path, body) {
   });
   if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`);
   return res.json();
+}
+
+// POST /api/downloads/export doesn't return JSON — it streams back a zip
+// blob, so it needs its own helper (raw fetch, no apiPost/json parsing) that
+// triggers a browser download via a temporary <a> element.
+async function apiPostBlobDownload(path, body, downloadName) {
+  const res = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = downloadName || "download.zip";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ============================================================================
@@ -191,6 +177,65 @@ function GlobalStyles() {
 }
 
 // ============================================================================
+// 1c) FIGURE CARD — tam ekran wrapper
+// ============================================================================
+function FigureCard({ children, className = "", style = {} }) {
+  const ref = useRef(null);
+  const [isFs, setIsFs] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      ref.current?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  };
+
+  return (
+    <div
+      ref={ref}
+      className={`relative rounded-2xl ${className}`}
+      style={{
+        backgroundColor: "#fff",
+        border: `1px solid ${COLORS.line}`,
+        ...(isFs ? { overflow: "auto", padding: "1.5rem" } : {}),
+        ...style,
+      }}
+    >
+      <button
+        onClick={toggleFullscreen}
+        title={isFs ? "Tam ekrandan çık" : "Tam ekran"}
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          zIndex: 10,
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          color: COLORS.inkSoft,
+          opacity: 0.6,
+          padding: 4,
+          borderRadius: 6,
+          lineHeight: 0,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
+      >
+        <Maximize2 size={15} />
+      </button>
+      {children}
+    </div>
+  );
+}
+
+// ============================================================================
 // 2) CATEGORIES
 // ============================================================================
 const CATEGORIES = [
@@ -221,6 +266,24 @@ const FERMENTED_CATEGORIES = new Set([
 ]);
 const isFermented = (categoryKey) => FERMENTED_CATEGORIES.has(categoryKey);
 
+// Full country names keyed by ISO3 code — mirrors backend/src/config/countries.js
+const COUNTRY_FULL_NAMES = {
+  ITA: "Italy", TUR: "Türkiye", FRA: "France", DEU: "Germany", GBR: "United Kingdom",
+  NLD: "Netherlands", POL: "Poland", USA: "United States of America", MEX: "Mexico", BRA: "Brazil",
+  CHN: "China", JPN: "Japan", KOR: "South Korea", IND: "India", THA: "Thailand",
+  VNM: "Vietnam", EGY: "Egypt", NGA: "Nigeria", KEN: "Kenya", AUS: "Australia",
+  ESP: "Spain", GRC: "Greece", NOR: "Norway", PRT: "Portugal", BEL: "Belgium",
+  CHE: "Switzerland", AUT: "Austria", SWE: "Sweden", DNK: "Denmark", FIN: "Finland",
+  IRL: "Ireland", CAN: "Canada", ARG: "Argentina", CHL: "Chile", ZAF: "South Africa",
+  RUS: "Russia", UKR: "Ukraine", ROU: "Romania", HUN: "Hungary", CZE: "Czechia",
+  SVK: "Slovakia", HRV: "Croatia", SRB: "Serbia", BGR: "Bulgaria", IDN: "Indonesia",
+  MYS: "Malaysia", PHL: "Philippines", SGP: "Singapore", NZL: "New Zealand",
+  ISR: "Israel", SAU: "Saudi Arabia", ARE: "United Arab Emirates", PAK: "Pakistan",
+  BGD: "Bangladesh", ETH: "Ethiopia", MAR: "Morocco", TUN: "Tunisia", DZA: "Algeria",
+  COL: "Colombia", PER: "Peru", ECU: "Ecuador", URY: "Uruguay", CRI: "Costa Rica",
+};
+
+
 // ============================================================================
 // 3) ANNOTATIONS
 // ============================================================================
@@ -234,6 +297,13 @@ const ANNOTATIONS = [
   { key: "pfam_kegg", label: "Pfam & KEGG KO", tool: "eggNOG-mapper", short: "Pfam/KO" },
 ];
 
+// Annotation keys exactly as accepted by POST /api/downloads/export's
+// `include.annotations` field, per the API contract. This intentionally
+// does NOT reuse ANNOTATIONS' keys above 1:1 (that list has extra/renamed
+// entries like "acp" and "pfam_kegg" that the export endpoint doesn't
+// recognize) — this is the literal whitelist for export requests.
+const EXPORT_ANNOTATION_KEYS = ["amr", "cazyme", "cgc", "crispr_cas", "amp", "pfam_ko"];
+
 // ============================================================================
 // 4) NAVIGATION
 // ============================================================================
@@ -241,7 +311,7 @@ const NAV_ITEMS = [
   { key: "home", label: "Home" },
   { key: "about", label: "About GFPR" },
   { key: "data", label: "Data Access" },
-  { key: "analysis", label: "Analysis" },
+  { key: "rawdata", label: "Raw Data" },
   { key: "contact", label: "Contact" },
 ];
 
@@ -263,12 +333,12 @@ const HOME_CARDS = [
     image: "/images/card-data-table.jpg",
   },
   {
-    key: "analysis",
-    title: "Analysis",
-    teaser: "Upload your own data, see the closest matches.",
+    key: "rawdata",
+    title: "Raw Data",
+    teaser: "Direct links to Zenodo raw sequencing archives.",
     desc:
-      "Upload a FASTA, GFA, or protein/DNA file of your own and get back the 10 closest matching plasmid IDs in our database, plus a prediction of the likely sample type, host, and origin. Click to explore.",
-    image: "/images/card-analysis-lab.jpg",
+      "Jump straight to the raw sequencing data archived on Zenodo, browseable by food category or by country of origin. No filters needed — grab an entire category's reads in one click. Click to explore.",
+    image: "/images/card-data-table.jpg",
   },
   {
     key: "contact",
@@ -473,66 +543,90 @@ function HomePage({ setPage }) {
 // ============================================================================
 // 9) ABOUT GFPR PAGE
 // ============================================================================
-const PHYLA = [
-  { id: "p1", label: "Proteobacteria", color: COLORS.darkTeal },
-  { id: "p2", label: "Firmicutes", color: COLORS.orange },
-  { id: "p3", label: "Bacteroidota", color: COLORS.medTeal },
-  { id: "p4", label: "Actinobacteriota", color: COLORS.berry },
+
+// ---- 9.1 Radial phylogeny (GERÇEK VERİ) ------------------------------------
+// The API (GET /api/stats/taxonomy) returns a flat list of
+// { id, level(0-3), label, parentId, phylumId } — the exact same shape the
+// old mock CLADO_NODES used, just with `parentId` instead of `parent` and no
+// per-phylum color. Colors are assigned locally from a fixed palette, keyed
+// by phylumId, in the order phyla appear in the fetched data.
+const PHYLUM_COLOR_PALETTE = [
+  COLORS.darkTeal, COLORS.orange, COLORS.medTeal, COLORS.berry,
+  COLORS.deepOrange, COLORS.yellow, "#4D8080", "#8FA6A0",
 ];
-const CLADO_NODES = [
-  { id: "p1", level: 0, label: "Proteobacteria", phylumId: "p1" },
-  { id: "p2", level: 0, label: "Firmicutes", phylumId: "p2" },
-  { id: "p3", level: 0, label: "Bacteroidota", phylumId: "p3" },
-  { id: "p4", level: 0, label: "Actinobacteriota", phylumId: "p4" },
-  { id: "c1", level: 1, label: "Gammaproteobacteria", parent: "p1", phylumId: "p1" },
-  { id: "c2", level: 1, label: "Alphaproteobacteria", parent: "p1", phylumId: "p1" },
-  { id: "c3", level: 1, label: "Bacilli", parent: "p2", phylumId: "p2" },
-  { id: "c4", level: 1, label: "Clostridia", parent: "p2", phylumId: "p2" },
-  { id: "c5", level: 1, label: "Bacteroidia", parent: "p3", phylumId: "p3" },
-  { id: "c6", level: 1, label: "Actinomycetia", parent: "p4", phylumId: "p4" },
-  { id: "o1", level: 2, label: "Enterobacterales", parent: "c1", phylumId: "p1" },
-  { id: "o2", level: 2, label: "Pseudomonadales", parent: "c1", phylumId: "p1" },
-  { id: "o3", level: 2, label: "Rhizobiales", parent: "c2", phylumId: "p1" },
-  { id: "o4", level: 2, label: "Lactobacillales", parent: "c3", phylumId: "p2" },
-  { id: "o5", level: 2, label: "Bacillales", parent: "c3", phylumId: "p2" },
-  { id: "o6", level: 2, label: "Clostridiales", parent: "c4", phylumId: "p2" },
-  { id: "o7", level: 2, label: "Bacteroidales", parent: "c5", phylumId: "p3" },
-  { id: "o8", level: 2, label: "Corynebacteriales", parent: "c6", phylumId: "p4" },
-  { id: "f1", level: 3, label: "Enterobacteriaceae", parent: "o1", phylumId: "p1" },
-  { id: "f2", level: 3, label: "Morganellaceae", parent: "o1", phylumId: "p1" },
-  { id: "f3", level: 3, label: "Pseudomonadaceae", parent: "o2", phylumId: "p1" },
-  { id: "f4", level: 3, label: "Rhizobiaceae", parent: "o3", phylumId: "p1" },
-  { id: "f5", level: 3, label: "Streptococcaceae", parent: "o4", phylumId: "p2" },
-  { id: "f6", level: 3, label: "Lactobacillaceae", parent: "o4", phylumId: "p2" },
-  { id: "f7", level: 3, label: "Bacillaceae", parent: "o5", phylumId: "p2" },
-  { id: "f8", level: 3, label: "Clostridiaceae", parent: "o6", phylumId: "p2" },
-  { id: "f9", level: 3, label: "Bacteroidaceae", parent: "o7", phylumId: "p3" },
-  { id: "f10", level: 3, label: "Corynebacteriaceae", parent: "o8", phylumId: "p4" },
-];
-const cladoById = Object.fromEntries(CLADO_NODES.map((n) => [n.id, n]));
 
 function RadialTaxonomy({ onSeeSamples }) {
   const [hoverPhylum, setHoverPhylum] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
+  const [nodes, setNodes] = useState(null);
+  const [error, setError] = useState(null);
+  // Zoom/pan state for hover zoom
+  const [zoom, setZoom] = useState(1);
+  const [zoomCenter, setZoomCenter] = useState({ cx: 380, cy: 380 });
+  const svgContainerRef = useRef(null);
+  const zoomTimerRef = useRef(null);
+
+  useEffect(() => {
+    apiGet("/api/stats/taxonomy").then(setNodes).catch((e) => setError(e.message));
+  }, []);
+
   const size = 760;
   const cx = size / 2, cy = size / 2;
   const radii = { 0: 60, 1: 135, 2: 205, 3: 255 };
 
+  // Scroll zoom handler
+  useEffect(() => {
+    const el = svgContainerRef.current;
+    if (!el) return;
+    const handleWheel = (e) => {
+      e.preventDefault();
+      setZoom((z) => clamp(z * (e.deltaY < 0 ? 1.2 : 1 / 1.2), 1, 5));
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [nodes]);
+
+  const handleMouseEnterSvg = () => {
+    zoomTimerRef.current = setTimeout(() => setZoom(2.5), 100);
+  };
+  const handleMouseLeaveSvg = () => {
+    clearTimeout(zoomTimerRef.current);
+    setZoom(1);
+  };
+
+  // Compute SVG viewBox based on zoom
+  const svgViewW = size / zoom;
+  const svgViewH = size / zoom;
+  const svgVX = clamp(zoomCenter.cx - svgViewW / 2, 0, size - svgViewW);
+  const svgVY = clamp(zoomCenter.cy - svgViewH / 2, 0, size - svgViewH);
+
+  const nodeById = useMemo(() => Object.fromEntries((nodes || []).map((n) => [n.id, n])), [nodes]);
+
+  const phylumColors = useMemo(() => {
+    if (!nodes) return {};
+    const phyla = nodes.filter((n) => n.level === 0);
+    const map = {};
+    phyla.forEach((p, i) => { map[p.id] = PHYLUM_COLOR_PALETTE[i % PHYLUM_COLOR_PALETTE.length]; });
+    return map;
+  }, [nodes]);
+
   const angleById = useMemo(() => {
+    if (!nodes) return {};
     const childrenOf = {};
-    CLADO_NODES.forEach((n) => { if (n.parent) (childrenOf[n.parent] = childrenOf[n.parent] || []).push(n.id); });
-    const leaves = CLADO_NODES.filter((n) => n.level === 3);
+    nodes.forEach((n) => { if (n.parentId) (childrenOf[n.parentId] = childrenOf[n.parentId] || []).push(n.id); });
+    const leaves = nodes.filter((n) => n.level === 3);
+    if (leaves.length === 0) return {};
     const step = 360 / leaves.length;
     const angles = {};
     leaves.forEach((leaf, i) => { angles[leaf.id] = i * step; });
     [2, 1, 0].forEach((lvl) => {
-      CLADO_NODES.filter((n) => n.level === lvl).forEach((n) => {
+      nodes.filter((n) => n.level === lvl).forEach((n) => {
         const kids = childrenOf[n.id] || [];
         if (kids.length) angles[n.id] = kids.reduce((s, k) => s + angles[k], 0) / kids.length;
       });
     });
     return angles;
-  }, []);
+  }, [nodes]);
 
   const polar = (r, angleDeg) => {
     const a = ((angleDeg - 90) * Math.PI) / 180;
@@ -551,7 +645,7 @@ function RadialTaxonomy({ onSeeSamples }) {
   };
 
   return (
-    <div className="rounded-2xl p-5" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
+    <FigureCard className="p-5">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <GitBranch size={16} style={{ color: COLORS.darkTeal }} />
@@ -559,72 +653,114 @@ function RadialTaxonomy({ onSeeSamples }) {
             Host Phylogeny (Phylum → Family)
           </span>
         </div>
-        <span className="text-[11px]" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>example taxonomy</span>
-      </div>
-      <svg viewBox={`0 0 ${size} ${size}`} className="w-full" style={{ maxHeight: 520 }}>
-        {CLADO_NODES.filter((n) => n.parent).map((n) => {
-          const parent = cladoById[n.parent];
-          const dim = hoverPhylum && n.phylumId !== hoverPhylum;
-          return (
-            <path
-              key={`e-${n.id}`}
-              d={edgePath(parent, n)}
-              fill="none"
-              stroke={PHYLA.find((p) => p.id === n.phylumId)?.color}
-              strokeWidth={dim ? 1 : 1.6}
-              opacity={dim ? 0.15 : 0.7}
-            />
-          );
-        })}
-        {CLADO_NODES.map((n) => {
-          const r = radii[n.level];
-          const angle = angleById[n.id];
-          const [x, y] = polar(r, angle);
-          const color = PHYLA.find((p) => p.id === n.phylumId)?.color;
-          const dim = hoverPhylum && n.phylumId !== hoverPhylum;
-          const leftHalf = angle > 90 && angle < 270;
-          return (
-            <g
-              key={n.id}
-              onMouseEnter={() => setHoverPhylum(n.phylumId)}
-              onMouseLeave={() => setHoverPhylum(null)}
-              onClick={() => setSelectedNode({ id: n.id, label: n.label })}
-              style={{ cursor: "pointer" }}
-              opacity={dim ? 0.25 : 1}
-            >
-              <circle cx={x} cy={y} r={n.level === 0 ? 5 : 3.5} fill={color} stroke={selectedNode?.id === n.id ? COLORS.ink : "none"} strokeWidth={selectedNode?.id === n.id ? 1.5 : 0} />
-              <text
-                x={x + (leftHalf ? -9 : 9)}
-                y={y + 3}
-                textAnchor={leftHalf ? "end" : "start"}
-                fontSize={n.level === 0 ? 12 : 10}
-                fontWeight={n.level === 0 || selectedNode?.id === n.id ? 700 : 400}
-                fill={n.level === 0 ? COLORS.ink : COLORS.inkSoft}
-                fontFamily={FONT_BODY}
-              >
-                {n.label}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-      <div className="flex items-center justify-between gap-3 flex-wrap mt-2">
-        <p className="text-xs" style={{ color: COLORS.inkSoft }}>
-          Hover a branch to highlight its phylum; click any node to select it.
-        </p>
-        {selectedNode && (
-          <button
-            onClick={() => onSeeSamples({ type: "query", value: selectedNode.label })}
-            className="inline-flex items-center gap-1 text-xs font-semibold shrink-0"
-            style={{ color: COLORS.orange }}
-          >
-            See {selectedNode.label} samples <ArrowRight size={12} />
-          </button>
+        {nodes && (
+          <span className="text-[11px] flex items-center gap-1 mr-6" style={{ color: COLORS.inkSoft }}>
+            <ZoomIn size={11} /> Hover to zoom · scroll to adjust
+          </span>
         )}
       </div>
-    </div>
+
+      {error && <ErrorBlock message={error} />}
+      {!error && !nodes && <LoadingBlock />}
+      {!error && nodes && (
+        <>
+          <div
+            ref={svgContainerRef}
+            onMouseEnter={handleMouseEnterSvg}
+            onMouseLeave={handleMouseLeaveSvg}
+            onMouseMove={(e) => {
+              const rect = svgContainerRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              const relX = (e.clientX - rect.left) / rect.width;
+              const relY = (e.clientY - rect.top) / rect.height;
+              setZoomCenter({ cx: relX * size, cy: relY * size });
+            }}
+            style={{ touchAction: "none", userSelect: "none" }}
+          >
+            <svg
+              viewBox={`${svgVX} ${svgVY} ${svgViewW} ${svgViewH}`}
+              className="w-full"
+              style={{
+                maxHeight: 520,
+                cursor: zoom > 1 ? "zoom-out" : "zoom-in",
+                transition: "all 0.35s ease",
+              }}
+            >
+              {nodes.filter((n) => n.parentId).map((n) => {
+                const parent = nodeById[n.parentId];
+                if (!parent) return null;
+                const dim = hoverPhylum && n.phylumId !== hoverPhylum;
+                return (
+                  <path
+                    key={`e-${n.id}`}
+                    d={edgePath(parent, n)}
+                    fill="none"
+                    stroke={phylumColors[n.phylumId]}
+                    strokeWidth={dim ? 1 : 1.6}
+                    opacity={dim ? 0.15 : 0.7}
+                  />
+                );
+              })}
+              {nodes.map((n) => {
+                const r = radii[n.level];
+                const angle = angleById[n.id];
+                const [x, y] = polar(r, angle);
+                const color = phylumColors[n.phylumId];
+                const dim = hoverPhylum && n.phylumId !== hoverPhylum;
+                // Yazıyı radyal yöne döndür — sol yarıda 180° flip, sağda düz
+                const leftHalf = angle > 90 && angle < 270;
+                const rotAngle = leftHalf ? angle - 90 + 180 : angle - 90;
+                // Zoom'da daha fazla label göster
+                const showLabel = zoom >= 1.8 || n.level === 0;
+                const labelOffset = n.level === 0 ? 12 : 9;
+                return (
+                  <g
+                    key={n.id}
+                    onMouseEnter={() => setHoverPhylum(n.phylumId)}
+                    onMouseLeave={() => setHoverPhylum(null)}
+                    onClick={() => setSelectedNode({ id: n.id, label: n.label })}
+                    style={{ cursor: "pointer" }}
+                    opacity={dim ? 0.25 : 1}
+                  >
+                    <circle cx={x} cy={y} r={n.level === 0 ? 5 : 3.5} fill={color} stroke={selectedNode?.id === n.id ? COLORS.ink : "none"} strokeWidth={selectedNode?.id === n.id ? 1.5 : 0} />
+                    {showLabel && (
+                      <text
+                        transform={`translate(${x},${y}) rotate(${rotAngle}) translate(${labelOffset},0)`}
+                        textAnchor={leftHalf ? "end" : "start"}
+                        dominantBaseline="middle"
+                        fontSize={n.level === 0 ? 11 : 9}
+                        fontWeight={n.level === 0 || selectedNode?.id === n.id ? 700 : 400}
+                        fill={n.level === 0 ? COLORS.ink : COLORS.inkSoft}
+                        fontFamily={FONT_BODY}
+                      >
+                        {n.label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+          <div className="flex items-center justify-between gap-3 flex-wrap mt-2">
+            <p className="text-xs" style={{ color: COLORS.inkSoft }}>
+              Hover to zoom in · scroll to adjust zoom level · click any node to select it.
+            </p>
+            {selectedNode && (
+              <button
+                onClick={() => onSeeSamples({ type: "host_taxonomy", value: selectedNode.label })}
+                className="inline-flex items-center gap-1 text-xs font-semibold shrink-0"
+                style={{ color: COLORS.orange }}
+              >
+                See {selectedNode.label} samples <ArrowRight size={12} />
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </FigureCard>
   );
 }
+
 
 // ---- 9.2 Category share bars (GERÇEK VERİ) ---------------------------------
 function CategoryBarChart({ onSeeSamples }) {
@@ -641,8 +777,8 @@ function CategoryBarChart({ onSeeSamples }) {
 
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
-    <div className="rounded-2xl p-5" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
-      <div className="flex items-center gap-2 mb-4">
+    <FigureCard className="p-5">
+      <div className="flex items-center gap-2 mb-4 mr-6">
         <BarChart3 size={16} style={{ color: COLORS.darkTeal }} />
         <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal, fontFamily: FONT_BODY }}>
           Sample Share by Category
@@ -669,18 +805,36 @@ function CategoryBarChart({ onSeeSamples }) {
           </button>
         </div>
       )}
-    </div>
+    </FigureCard>
   );
 }
 
-// ---- 9.3 "Figure A" — circular chord diagram (GERÇEK VERİ) -----------------
-function buildChordLayout(categories, targets, gapDeg = 3) {
-  const catStart = 100, catEnd = 260;
-  const tgtStart = -75, tgtEnd = 75;
+const ANNOTATION_COLORS = {
+  amr: "#3861ED",       // Antimicrobial Resistance (blue)
+  cazyme: "#1A9C96",    // CAZyme (teal)
+  cgc: "#F28C28",       // CGC (orange)
+  crispr: "#7029F0",    // CRISPR (purple)
+  amp: "#8A2BE2",       // AMP (violet)
+  acp: "#FF1493",       // ACP (pink)
+  pfam_kegg: "#059033", // Pfam/KO (green)
+};
 
-  const catTotals = categories.map((c) => Object.values(c.values).reduce((a, b) => a + b, 0));
+function buildChordLayout(categories, targets, gapDeg = 3) {
+  const catStart = 90, catEnd = 270;
+  const tgtStart = -80, tgtEnd = 80;
+
+  // 1) Normalize the matrix (Math.pow to boost small values, and ignore 0)
+  const matrix = categories.map(c => {
+    return targets.map(t => {
+      const v = c.values[t.key] || 0;
+      return v > 0 ? Math.pow(v, 0.4) : 0;
+    });
+  });
+
+  const catTotals = matrix.map(row => row.reduce((a, b) => a + b, 0));
   const catTotalSum = catTotals.reduce((a, b) => a + b, 0) || 1;
   const catSpanTotal = catEnd - catStart - gapDeg * (categories.length - 1);
+  
   let cursor = catStart;
   const catBlocks = categories.map((c, i) => {
     const span = (catTotals[i] / catTotalSum) * catSpanTotal;
@@ -689,37 +843,44 @@ function buildChordLayout(categories, targets, gapDeg = 3) {
     return block;
   });
 
-  const tgtTotals = targets.map((t) => categories.reduce((s, c) => s + (c.values[t.key] || 0), 0));
+  const tgtTotals = targets.map((t, j) => matrix.reduce((sum, row) => sum + row[j], 0));
   const tgtTotalSum = tgtTotals.reduce((a, b) => a + b, 0) || 1;
   const tgtSpanTotal = tgtEnd - tgtStart - gapDeg * (targets.length - 1);
+  
   cursor = tgtStart;
-  const tgtBlocks = targets.map((t, i) => {
-    const span = (tgtTotals[i] / tgtTotalSum) * tgtSpanTotal;
-    const block = { ...t, a0: cursor, a1: cursor + span, total: tgtTotals[i] || 1 };
+  const tgtBlocks = targets.map((t, j) => {
+    const span = (tgtTotals[j] / tgtTotalSum) * tgtSpanTotal;
+    const block = { ...t, a0: cursor, a1: cursor + span, total: tgtTotals[j] || 1 };
     cursor += span + gapDeg;
     return block;
   });
 
-  const tgtRunning = tgtBlocks.map((b) => b.a0);
   const ribbons = [];
-  catBlocks.forEach((cat) => {
+  // To avoid crossing, target endpoints must be assigned in REVERSE order of categories
+  const tgtRunning = tgtBlocks.map(b => b.a1); 
+
+  catBlocks.forEach((cat, i) => {
     let a = cat.a0;
-    targets.forEach((t, ti) => {
-      const v = cat.values[t.key] || 0;
+    targets.forEach((t, j) => {
+      const v = matrix[i][j];
       if (v <= 0) return;
+      
       const srcSpan = (v / cat.total) * (cat.a1 - cat.a0);
-      const tgtSpan = (v / tgtBlocks[ti].total) * (tgtBlocks[ti].a1 - tgtBlocks[ti].a0);
+      const tgtSpan = (v / tgtBlocks[j].total) * (tgtBlocks[j].a1 - tgtBlocks[j].a0);
+      
+      tgtRunning[j] -= tgtSpan;
+      
       ribbons.push({
         catKey: cat.key,
-        color: cat.color,
         targetKey: t.key,
+        color: ANNOTATION_COLORS[t.key] || "#999", // Color by annotation!
         srcA0: a,
         srcA1: a + srcSpan,
-        tgtA0: tgtRunning[ti],
-        tgtA1: tgtRunning[ti] + tgtSpan,
+        tgtA0: tgtRunning[j],
+        tgtA1: tgtRunning[j] + tgtSpan,
       });
+      
       a += srcSpan;
-      tgtRunning[ti] += tgtSpan;
     });
   });
 
@@ -728,12 +889,13 @@ function buildChordLayout(categories, targets, gapDeg = 3) {
 
 function RibbonChord({ onSeeSamples }) {
   const [hoverCat, setHoverCat] = useState(null);
+  const [hoverTgt, setHoverTgt] = useState(null);
   const [selected, setSelected] = useState(null);
   const [raw, setRaw] = useState(null);
   const [error, setError] = useState(null);
-  const width = 820, height = 560;
-  const cx = 460, cy = 280;
-  const R = 185, outerR = 200, labelR = 218;
+  const width = 900, height = 700;
+  const cx = 450, cy = 350;
+  const R = 230, outerR = 245, labelR = 260;
 
   useEffect(() => {
     apiGet("/api/stats/annotation-flow").then(setRaw).catch((e) => setError(e.message));
@@ -755,48 +917,52 @@ function RibbonChord({ onSeeSamples }) {
     const a = ((angleDeg - 90) * Math.PI) / 180;
     return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
   };
+  
   const arcPath = (rInner, rOuter, a0, a1) => {
     const large = Math.abs(a1 - a0) > 180 ? 1 : 0;
     const [x1, y1] = polar(rOuter, a0), [x2, y2] = polar(rOuter, a1);
     const [x3, y3] = polar(rInner, a1), [x4, y4] = polar(rInner, a0);
     return `M ${x1},${y1} A ${rOuter},${rOuter} 0 ${large} 1 ${x2},${y2} L ${x3},${y3} A ${rInner},${rInner} 0 ${large} 0 ${x4},${y4} Z`;
   };
+  
   const ribbonPath = (a0, a1, b0, b1) => {
     const [x1, y1] = polar(R, a0), [x2, y2] = polar(R, a1);
     const [x3, y3] = polar(R, b0), [x4, y4] = polar(R, b1);
     const largeA = Math.abs(a1 - a0) > 180 ? 1 : 0;
     const largeB = Math.abs(b1 - b0) > 180 ? 1 : 0;
-    return `M ${x1},${y1} A ${R},${R} 0 ${largeA} 1 ${x2},${y2} Q ${cx},${cy} ${x3},${y3} A ${R},${R} 0 ${largeB} 1 ${x4},${y4} Q ${cx},${cy} ${x1},${y1} Z`;
+    // Cubic bezier curves to origin (cx,cy) for smooth ribbon flow without sharp corners
+    return `M ${x1},${y1} A ${R},${R} 0 ${largeA} 1 ${x2},${y2} C ${cx},${cy} ${cx},${cy} ${x3},${y3} A ${R},${R} 0 ${largeB} 1 ${x4},${y4} C ${cx},${cy} ${cx},${cy} ${x1},${y1} Z`;
   };
 
-  if (error) return <div className="rounded-2xl p-5 lg:col-span-2" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}><ErrorBlock message={error} /></div>;
-  if (!raw) return <div className="rounded-2xl p-5 lg:col-span-2" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}><LoadingBlock /></div>;
+  if (error) return <FigureCard className="p-5 lg:col-span-2"><ErrorBlock message={error} /></FigureCard>;
+  if (!raw) return <FigureCard className="p-5 lg:col-span-2"><LoadingBlock /></FigureCard>;
 
   return (
-    <div className="rounded-2xl p-5 lg:col-span-2" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
-      <div className="flex items-center gap-2 mb-1">
+    <FigureCard className="p-5 lg:col-span-2">
+      <div className="flex items-center gap-2 mb-1 mr-6">
         <Waves size={16} style={{ color: COLORS.darkTeal }} />
         <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal, fontFamily: FONT_BODY }}>
-          Figure A — Category to Functional Annotation Flow
+          Category to Functional Annotation Flow
         </span>
       </div>
       <p className="text-xs mb-3" style={{ color: COLORS.inkSoft }}>
-        Ribbon thickness shows contribution share; ribbon color always reflects the SOURCE category. Click a category
-        or an annotation arc to select it.
+        Ribbon width is normalized (Math.pow(0.4)) to ensure all food categories and annotations remain clearly visible regardless of vast sample count differences. Ribbon color reflects the TARGET annotation. Click an arc to select it.
       </p>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ maxHeight: 480 }}>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ maxHeight: "75vh" }}>
         {ribbons.map((r, i) => {
-          const dimmed = hoverCat && hoverCat !== r.catKey;
+          const dimmed = (hoverCat && hoverCat !== r.catKey) || (hoverTgt && hoverTgt !== r.targetKey);
           return (
             <path
               key={i}
               d={ribbonPath(r.srcA0, r.srcA1, r.tgtA0, r.tgtA1)}
               fill={r.color}
-              opacity={dimmed ? 0.06 : hoverCat === r.catKey ? 0.85 : 0.45}
+              opacity={dimmed ? 0.05 : ((hoverCat === r.catKey || hoverTgt === r.targetKey) ? 0.85 : 0.45)}
               style={{ transition: "opacity 0.25s ease" }}
             />
           );
         })}
+        
+        {/* Source Categories (Food) */}
         {catBlocks.map((b) => {
           const mid = (b.a0 + b.a1) / 2;
           const [lx, ly] = polar(labelR, mid);
@@ -810,129 +976,148 @@ function RibbonChord({ onSeeSamples }) {
               onClick={() => setSelected({ type: "category", key: b.key, label: b.label })}
               style={{ cursor: "pointer" }}
             >
-              <path d={arcPath(R, outerR, b.a0, b.a1)} fill={b.color} opacity={hoverCat === b.key || isSel ? 1 : 0.9} />
-              <text x={lx} y={ly} textAnchor={leftHalf ? "end" : "start"} dominantBaseline="middle" fontSize={11.5} fontWeight={hoverCat === b.key || isSel ? 700 : 500} fill={COLORS.ink} fontFamily={FONT_BODY}>
+              <path d={arcPath(R + 2, outerR, b.a0, b.a1)} fill={b.color} stroke="#fff" strokeWidth={0.5} />
+              <text
+                transform={`translate(${lx},${ly}) rotate(${leftHalf ? mid - 270 : mid - 90})`}
+                textAnchor={leftHalf ? "end" : "start"}
+                dominantBaseline="middle"
+                fontSize={isSel ? 10 : 9}
+                fontWeight={isSel ? 700 : 500}
+                fill={COLORS.ink}
+                fontFamily={FONT_BODY}
+              >
                 {b.label}
               </text>
             </g>
           );
         })}
+
+        {/* Target Annotations (Functions) */}
         {tgtBlocks.map((b) => {
           const mid = (b.a0 + b.a1) / 2;
           const [lx, ly] = polar(labelR, mid);
           const leftHalf = mid > 90 && mid < 270;
           const isSel = selected?.type === "annotation" && selected.key === b.key;
+          const tColor = ANNOTATION_COLORS[b.key] || "#999";
           return (
-            <g key={b.key} onClick={() => setSelected({ type: "annotation", key: b.key, label: b.label })} style={{ cursor: "pointer" }}>
-              <path d={arcPath(R, outerR, b.a0, b.a1)} fill={COLORS.ink} opacity={isSel ? 1 : 0.7} />
-              <text x={lx} y={ly} textAnchor={leftHalf ? "end" : "start"} dominantBaseline="middle" fontSize={12} fontWeight={isSel ? 700 : 600} fill={COLORS.darkTeal} fontFamily={FONT_MONO}>
+            <g
+              key={b.key}
+              onMouseEnter={() => setHoverTgt(b.key)}
+              onMouseLeave={() => setHoverTgt(null)}
+              onClick={() => setSelected({ type: "annotation", key: b.key, label: b.label })}
+              style={{ cursor: "pointer" }}
+            >
+              <path d={arcPath(R + 2, outerR, b.a0, b.a1)} fill={tColor} stroke="#fff" strokeWidth={0.5} />
+              <text
+                transform={`translate(${lx},${ly}) rotate(${leftHalf ? mid - 270 : mid - 90})`}
+                textAnchor={leftHalf ? "end" : "start"}
+                dominantBaseline="middle"
+                fontSize={isSel ? 11 : 10}
+                fontWeight={isSel ? 700 : 500}
+                fill={tColor}
+                fontFamily={FONT_BODY}
+              >
                 {b.label}
               </text>
             </g>
           );
         })}
       </svg>
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.paperAlt}` }}>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {ANNOTATIONS.map((a) => (
-            <span key={a.key} className="text-[11px]" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>
-              <strong style={{ color: COLORS.darkTeal }}>{a.short}</strong> = {a.label} ({a.tool})
-            </span>
-          ))}
-        </div>
-        {selected && (
-          <button
-            onClick={() => onSeeSamples({ type: selected.type, value: selected.key })}
-            className="inline-flex items-center gap-1 text-xs font-semibold shrink-0"
-            style={{ color: COLORS.orange }}
-          >
+      {selected && (
+        <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: `1px solid ${COLORS.paperAlt}` }}>
+          <span className="text-xs" style={{ color: COLORS.inkSoft }}>Selected: <strong style={{ color: COLORS.ink }}>{selected.label}</strong></span>
+          <button onClick={() => onSeeSamples({ type: selected.type, value: selected.type === "category" ? selected.key : selected.label })} className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: COLORS.orange }}>
             See {selected.label} samples <ArrowRight size={12} />
           </button>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </FigureCard>
   );
 }
 
-// ---- 9.4 World sample map (GERÇEK sayı/kategori, MOCK centroid konumu) -----
-const WORLD_MAP_URL = "https://commons.wikimedia.org/wiki/Special:FilePath/BlankMap-Equirectangular.svg";
-const MAP_W = 360;
-const MAP_H = 180;
-const toMapXY = (lat, lon) => [lon + 180, 90 - lat];
+
+// ---- 9.4 World sample map — react-simple-maps tabanlı ülke renklendirme ----
+// Sample sayısı arttıkça soluk yeşilden turtuncuya kayar.
+// Dominant category modunda ülke o kategorinin rengiyle boyanır.
+const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+
+// ISO numeric → ISO3 dönüşüm tablosu (react-simple-maps numeric ID kullanır)
+// Backend centroidFor() ISO3 döndürüyor, bu yüzden label eşleştirme için
+// yeterli olduğundan; harita verisiyle API verisini label üzerinden birleştiriyoruz.
+// Backend /api/stats/map zaten label (ülke adı) döndürüyor.
+
+function sampleCountColor(count, maxCount) {
+  if (!count || !maxCount) return "#d1e8d1"; // no data - pale green
+  // Use log scale (Math.log) or square root to normalize color distribution
+  // because maxCount is huge compared to average count, leading to poor contrast.
+  const normCount = Math.pow(count, 0.35);
+  const normMax = Math.pow(maxCount, 0.35);
+  const t = Math.min(1, normCount / normMax);
+  
+  if (t < 0.25)  return `hsl(${120 - t * 40}, 40%, ${82 - t * 15}%)`;
+  if (t < 0.55)  return `hsl(${120 - t * 80}, 50%, ${70 - t * 20}%)`;
+  if (t < 0.80)  return `hsl(${40 - t * 10}, 75%, ${55 - t * 5}%)`;
+  return COLORS.orange;
+}
 
 function WorldHeatMap({ onSeeSamples }) {
   const [mode, setMode] = useState("count");
   const [active, setActive] = useState(null);
   const [locked, setLocked] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const svgRef = useRef(null);
-  const dragRef = useRef(null);
-  const [points, setPoints] = useState(null);
+  const [mapPoints, setMapPoints] = useState(null);
   const [error, setError] = useState(null);
+  const [position, setPosition] = useState({ coordinates: [0, 20], zoom: 1 });
 
   useEffect(() => {
     apiGet("/api/stats/map")
-      .then((rows) => {
-        const withXY = rows
-          .filter((r) => r.lat !== null && r.lon !== null)
-          .map((r) => {
-            const [x, y] = toMapXY(r.lat, r.lon);
-            return { ...r, x, y };
-          });
-        setPoints(withXY);
-      })
+      .then((rows) => setMapPoints(rows.filter((r) => r.lat !== null && r.lon !== null)))
       .catch((e) => setError(e.message));
   }, []);
 
-  const viewW = MAP_W / zoom, viewH = MAP_H / zoom;
-  const vx = clamp(pan.x, 0, Math.max(0, MAP_W - viewW));
-  const vy = clamp(pan.y, 0, Math.max(0, MAP_H - viewH));
+  const maxCount = useMemo(
+    () => (mapPoints?.length ? Math.max(...mapPoints.map((p) => p.count)) : 1),
+    [mapPoints]
+  );
 
-  const zoomBy = (factor) => setZoom((z) => clamp(z * factor, 1, 5));
-  const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
-
-  useEffect(() => {
-    const el = svgRef.current;
-    if (!el) return;
-    const handleWheel = (e) => {
-      e.preventDefault();
-      setZoom((z) => clamp(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 1, 5));
-    };
-    el.addEventListener("wheel", handleWheel, { passive: false });
-    return () => el.removeEventListener("wheel", handleWheel);
-  }, []);
-
-  const onPointerDown = (e) => {
-    if (zoom <= 1) return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: vx, panY: vy };
-  };
-  const onPointerMove = (e) => {
-    if (!dragRef.current || !svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const scaleX = viewW / rect.width;
-    const scaleY = viewH / rect.height;
-    const dx = (e.clientX - dragRef.current.startX) * scaleX;
-    const dy = (e.clientY - dragRef.current.startY) * scaleY;
-    setPan({ x: dragRef.current.panX - dx, y: dragRef.current.panY - dy });
-  };
-  const onPointerUp = () => { dragRef.current = null; };
-
-  const maxCount = points && points.length ? Math.max(...points.map((p) => p.count)) : 1;
-  const countColor = (v) => {
-    const t = v / maxCount;
-    if (t < 0.3) return COLORS.lightTeal;
-    if (t < 0.55) return COLORS.medTeal;
-    if (t < 0.8) return COLORS.orange;
-    return COLORS.berry;
-  };
+  const byLabel = useMemo(() => {
+    if (!mapPoints) return {};
+    const m = {};
+    for (const p of mapPoints) m[p.label] = p;
+    return m;
+  }, [mapPoints]);
 
   const selectPoint = (p) => { setActive(p); setLocked(true); };
-  const clearSelection = () => { setActive(null); setLocked(false); };
+  
+  const handleZoomIn = () => {
+    if (position.zoom >= 8) return;
+    setPosition(pos => ({ ...pos, zoom: pos.zoom * 1.5 }));
+  };
+  
+  const handleZoomOut = () => {
+    if (position.zoom <= 1) return;
+    setPosition(pos => ({ ...pos, zoom: pos.zoom / 1.5 }));
+  };
+  
+  const handleReset = () => {
+    setPosition({ coordinates: [0, 20], zoom: 1 });
+  };
+  
+  const handleMoveEnd = (position) => {
+    setPosition(position);
+  };
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      handleZoomIn();
+    } else {
+      handleZoomOut();
+    }
+  };
 
   return (
-    <div className="rounded-2xl p-5 lg:col-span-2" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+    <FigureCard className="p-5 lg:col-span-2">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2 mr-6">
         <div className="flex items-center gap-2">
           <Globe2 size={16} style={{ color: COLORS.darkTeal }} />
           <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal, fontFamily: FONT_BODY }}>
@@ -953,64 +1138,85 @@ function WorldHeatMap({ onSeeSamples }) {
             ))}
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={() => zoomBy(1.3)} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }} title="Zoom in">
-              <ZoomIn size={14} />
-            </button>
-            <button onClick={() => zoomBy(1 / 1.3)} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }} title="Zoom out">
-              <ZoomOut size={14} />
-            </button>
-            <button onClick={resetView} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }} title="Reset view">
-              <RotateCcw size={14} />
-            </button>
+            <button onClick={handleZoomIn} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }} title="Zoom in"><ZoomIn size={14} /></button>
+            <button onClick={handleZoomOut} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }} title="Zoom out"><ZoomOut size={14} /></button>
+            <button onClick={handleReset} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }} title="Reset view"><RotateCcw size={14} /></button>
           </div>
         </div>
       </div>
 
       {error && <ErrorBlock message={error} />}
-      {!error && !points && <LoadingBlock />}
-      {!error && points && (
-        <>
-          <svg
-            ref={svgRef}
-            viewBox={`${vx} ${vy} ${viewW} ${viewH}`}
-            className="w-full"
-            style={{ maxHeight: 560, cursor: zoom > 1 ? "grab" : "default", touchAction: "none" }}
-            onMouseDown={onPointerDown}
-            onMouseMove={onPointerMove}
-            onMouseUp={onPointerUp}
-            onMouseLeave={onPointerUp}
-          >
-            <rect x={0} y={0} width={MAP_W} height={MAP_H} fill="#E8F2F3" />
-            <image href={WORLD_MAP_URL} x={0} y={0} width={MAP_W} height={MAP_H} preserveAspectRatio="none" opacity={0.9} />
-            {points.map((p) => {
-              const fill = mode === "count" ? countColor(p.count) : catColor(p.category);
-              const r = 2 + (p.count / maxCount) * 4.5;
-              const isActive = active && active.label === p.label;
-              return (
-                <g
-                  key={p.label}
-                  onMouseEnter={() => !locked && setActive(p)}
-                  onMouseLeave={() => !locked && setActive(null)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); selectPoint(p); }}
-                  style={{ cursor: "pointer" }}
-                >
-                  <circle cx={p.x} cy={p.y} r={r} fill={fill} opacity={0.85} stroke={isActive ? COLORS.ink : "#fff"} strokeWidth={isActive ? 0.9 : 0.5} />
-                </g>
-              );
-            })}
-          </svg>
-          <div className="mt-2 min-h-[40px] flex items-center justify-between flex-wrap gap-2">
-            {active ? (
-              <>
-                <div className="text-sm flex items-center gap-3 flex-wrap" style={{ fontFamily: FONT_BODY }}>
-                  <span className="font-semibold" style={{ color: COLORS.darkTeal }}>{active.label}</span>
-                  <span style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>n = {active.count}</span>
-                  {active.category && (
-                    <span className="px-2 py-0.5 rounded-full text-xs text-white" style={{ backgroundColor: catColor(active.category) }}>{catLabel(active.category)}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
+      {!error && !mapPoints && <LoadingBlock />}
+      {!error && mapPoints && (
+        <div className="flex flex-col h-full">
+          <div className="flex-1" style={{ borderRadius: 12, overflow: "hidden", backgroundColor: "#c8dce0", minHeight: 400 }} onWheel={handleWheel}>
+            <ComposableMap
+              projectionConfig={{ scale: 147 }}
+              style={{ width: "100%", height: "100%", maxHeight: "75vh" }}
+            >
+              <ZoomableGroup
+                zoom={position.zoom}
+                center={position.coordinates}
+                onMoveEnd={handleMoveEnd}
+              >
+                <Geographies geography={GEO_URL}>
+                  {({ geographies }) =>
+                    geographies.map((geo) => {
+                      const name = geo.properties.name;
+                      const point = byLabel[name];
+                      let fill = "#ddeee8"; // no data - light neutral
+                      if (point) {
+                        fill = mode === "count"
+                          ? sampleCountColor(point.count, maxCount)
+                          : catColor(point.category);
+                      }
+                      const isActive = active && active.label === name;
+                      return (
+                        <Geography
+                          key={geo.rsmKey}
+                          geography={geo}
+                          fill={fill}
+                          stroke="#fff"
+                          strokeWidth={0.4 / position.zoom}
+                          style={{
+                            default: { outline: "none", opacity: point ? 1 : 0.65 },
+                            hover: { outline: "none", opacity: 0.85, cursor: point ? "pointer" : "default" },
+                            pressed: { outline: "none" },
+                          }}
+                          onMouseEnter={() => { if (point && !locked) setActive(point); }}
+                          onMouseLeave={() => { if (!locked) setActive(null); }}
+                          onClick={() => { if (point) selectPoint(point); }}
+                          className={isActive ? "country-active" : ""}
+                        />
+                      );
+                    })
+                  }
+                </Geographies>
+              </ZoomableGroup>
+            </ComposableMap>
+          </div>
+
+          <div className="mt-2 shrink-0">
+            {/* Color scale legend */}
+            {mode === "count" && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>Low</span>
+                <div style={{ flex: 1, height: 8, borderRadius: 4, background: "linear-gradient(to right, #a8d5a2, #539E9E, #EB7F00)", maxWidth: 180 }} />
+                <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>High</span>
+              </div>
+            )}
+
+            <div className="mt-2 min-h-[40px] flex items-center justify-between flex-wrap gap-2">
+              {active ? (
+                <>
+                  <div className="text-sm flex items-center gap-3 flex-wrap" style={{ fontFamily: FONT_BODY }}>
+                    <span className="font-semibold" style={{ color: COLORS.darkTeal }}>{active.label}</span>
+                    <span style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>n = {active.count}</span>
+                    {active.category && (
+                      <span className="px-2 py-0.5 rounded-full text-xs text-white" style={{ backgroundColor: catColor(active.category) }}>{catLabel(active.category)}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
                   <button onClick={() => onSeeSamples({ type: "country", value: active.label })} className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: COLORS.orange }}>
                     See {active.label} samples <ArrowRight size={12} />
                   </button>
@@ -1019,16 +1225,17 @@ function WorldHeatMap({ onSeeSamples }) {
               </>
             ) : (
               <span className="text-xs" style={{ color: COLORS.inkSoft }}>
-                Scroll or use the zoom controls to zoom in, drag to pan, and click a point to see samples from that
-                country. Nokta konumları yaklaşık ülke merkezi (mock centroid) — sayı ve kategori gerçek veridir.
+                Hover or click a country to see sample info. Sample count → color (low = pale green, high = orange).
               </span>
             )}
+            </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </FigureCard>
   );
 }
+
 
 // ---- 9.5 Overview stats (GERÇEK VERİ) --------------------------------------
 function OverviewStats() {
@@ -1190,7 +1397,10 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
   const [selectedAnnotations, setSelectedAnnotations] = useState(() => (initialFilter?.type === "annotation" ? [initialFilter.value] : []));
   const [fermentFilter, setFermentFilter] = useState(null);
   const [query, setQuery] = useState(() => (initialFilter?.type === "query" ? initialFilter.value : ""));
+  // host_taxonomy filtresi: RadialTaxonomy node tıklamasından geliyor
+  const [hostTaxQuery, setHostTaxQuery] = useState(() => (initialFilter?.type === "host_taxonomy" ? initialFilter.value : ""));
   const [selectedIds, setSelectedIds] = useState([]);
+  const [exporting, setExporting] = useState(false);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -1216,6 +1426,7 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
       year: selectedYears,
       fermented: fermentFilter === null ? undefined : String(fermentFilter),
       q: query || undefined,
+      hostTaxonomy: hostTaxQuery || undefined,
       page,
       pageSize,
     })
@@ -1225,17 +1436,55 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [selectedCats, selectedTypes, selectedSubtypes, selectedCountries, selectedYears, fermentFilter, query, page]);
+  }, [selectedCats, selectedTypes, selectedSubtypes, selectedCountries, selectedYears, fermentFilter, query, hostTaxQuery, page]);
 
   // Herhangi bir filtre değişince 1. sayfaya dön
-  useEffect(() => { setPage(1); }, [selectedCats, selectedTypes, selectedSubtypes, selectedCountries, selectedYears, fermentFilter, query]);
+  useEffect(() => { setPage(1); }, [selectedCats, selectedTypes, selectedSubtypes, selectedCountries, selectedYears, fermentFilter, query, hostTaxQuery]);
 
   const toggle = (setFn) => (val) => setFn((prev) => (prev.includes(val) ? prev.filter((x) => x !== val) : [...prev, val]));
   const toggleId = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const annotationNote = selectedAnnotations.length
-    ? `the selected annotation output (${selectedAnnotations.map((k) => ANNOTATIONS.find((a) => a.key === k)?.short).join(", ")})`
-    : "raw DNA sequences and every annotation output";
+  // Tüm filtreleri sıfırla
+  const resetAllFilters = () => {
+    setSelectedCats([]);
+    setSelectedTypes([]);
+    setSelectedSubtypes([]);
+    setSelectedCountries([]);
+    setSelectedYears([]);
+    setSelectedAnnotations([]);
+    setFermentFilter(null);
+    setQuery("");
+    setHostTaxQuery("");
+    setSelectedIds([]);
+  };
+
+  const hasAnyFilter = selectedCats.length > 0 || selectedTypes.length > 0 || selectedSubtypes.length > 0
+    || selectedCountries.length > 0 || selectedYears.length > 0 || selectedAnnotations.length > 0
+    || fermentFilter !== null || query !== "" || hostTaxQuery !== "";
+
+
+  
+  // Gerçek POST /api/downloads/export'a bağlı indirme. selectedIds varsa
+  // sadece o örnekler için, yoksa boş dizi (= geçerli filtreye göre "tümü")
+  // gönderilir. `annotationKeys`: Metadata (CSV) butonu için [], Download
+  // Files butonu için export sözleşmesindeki TÜM anotasyon anahtarları.
+  const runExport = async (annotationKeys) => {
+    setExporting(true);
+    try {
+      await apiPostBlobDownload(
+        "/api/downloads/export",
+        {
+          sampleIds: selectedIds,
+          include: { metadata: true, annotations: annotationKeys },
+        },
+        "gfpr-export.zip"
+      );
+    } catch (e) {
+      onMockAction(`İndirme başarısız oldu: ${e.message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div style={{ backgroundColor: COLORS.paper }} className="min-h-screen">
@@ -1293,7 +1542,10 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
               </div>
               <FilterChip
                 label="Country"
-                options={filterOptions.countries.map((c) => ({ value: c, label: c }))}
+                options={filterOptions.countries.map((c) => ({
+                  value: c,
+                  label: COUNTRY_FULL_NAMES[c] || c,
+                }))}
                 selected={selectedCountries}
                 onToggle={toggle(setSelectedCountries)}
               />
@@ -1329,18 +1581,20 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
           </span>
           <div className="flex gap-2">
             <button
-              onClick={() => onMockAction(`Metadata (CSV) will be downloaded for ${selectedIds.length || total} sample(s).`)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg"
+              onClick={() => runExport([])}
+              disabled={exporting}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-60"
               style={{ backgroundColor: COLORS.lightTeal, color: COLORS.darkTeal }}
             >
-              <Download size={13} /> Metadata (CSV)
+              <Download size={13} /> {exporting ? "Preparing..." : "Metadata (CSV)"}
             </button>
             <button
-              onClick={() => onMockAction(`For ${selectedIds.length || total} sample(s), ${annotationNote} will be downloaded.`)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg text-white"
+              onClick={() => runExport(EXPORT_ANNOTATION_KEYS)}
+              disabled={exporting}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg text-white disabled:opacity-60"
               style={{ backgroundColor: COLORS.orange }}
             >
-              <Download size={13} /> Download Files
+              <Download size={13} /> {exporting ? "Preparing..." : "Download Files"}
             </button>
           </div>
         </div>
@@ -1437,6 +1691,17 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
   const [record, setRecord] = useState(null);
   const [error, setError] = useState(null);
   const [selectedDownloads, setSelectedDownloads] = useState([]);
+  // Zenodo raw-data links (byCategory / byCountry) — fetched independently
+  // of the sample record so the "Download Raw Files" button can resolve as
+  // soon as both the record's category and this map are ready.
+  const [rawLinks, setRawLinks] = useState(null);
+
+  useEffect(() => {
+    apiGet("/api/raw-data/links").then(setRawLinks).catch(() => {
+      // Sessizce yut — bu buton opsiyonel bir kısayol, sayfanın geri
+      // kalanını bloklamamalı. Link çözülmezse buton devre dışı görünür.
+    });
+  }, []);
 
   useEffect(() => {
     setRecord(null);
@@ -1445,7 +1710,7 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
     apiGet(`/api/samples/${encodeURIComponent(recordId)}`)
       .then((data) => {
         setRecord(data);
-        setSelectedDownloads(["fasta", ...data.annotations.map((a) => a.key)]);
+        setSelectedDownloads([...data.annotations.map((a) => a.key)]);
       })
       .catch((e) => setError(e.message));
   }, [recordId]);
@@ -1471,7 +1736,7 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
     );
   }
 
-  const allKeys = ["fasta", ...record.annotations.map((a) => a.key)];
+  const allKeys = [...record.annotations.map((a) => a.key)];
   const toggleDownload = (key) => setSelectedDownloads((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   const toggleAllDownloads = () => setSelectedDownloads((prev) => (prev.length === allKeys.length ? [] : allKeys));
 
@@ -1482,11 +1747,14 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
   };
 
   const downloadItems = [
-    { key: "fasta", label: "Raw DNA Sequence (FASTA)", sub: `${record.id}.fasta` },
     ...record.annotations.map((a) => ({ key: a.key, label: ANNOTATION_LABELS[a.key] || a.key, sub: `${a.count} hit(s)` })),
   ];
 
   const annotationsToShow = record.annotations.filter((a) => selectedDownloads.includes(a.key));
+
+  // Bu örneğin kategorisine karşılık gelen Zenodo linki. rawLinks henüz
+  // yüklenmediyse ya da kategori eşleşmiyorsa buton devre dışı gösterilir.
+  const rawFilesUrl = rawLinks?.byCategory?.[record.category];
 
   return (
     <div style={{ backgroundColor: COLORS.paper }} className="min-h-screen">
@@ -1499,14 +1767,6 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
 
         <div className="grid md:grid-cols-[1fr_320px] gap-6">
           <div className="space-y-6">
-            <div className="rounded-2xl p-5" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal }}>FASTA Preview</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: COLORS.yellow, color: COLORS.deepOrange, fontFamily: FONT_MONO }}>mock</span>
-              </div>
-              <p className="text-xs" style={{ color: COLORS.inkSoft }}>Gerçek FASTA verisi bağlanmadı — dosya deposu hazır olduğunda burada gösterilecek.</p>
-            </div>
-
             <div className="rounded-2xl p-5" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
               <div className="text-sm font-semibold mb-3" style={{ color: COLORS.darkTeal }}>General Info</div>
               <div className="space-y-1.5">
@@ -1546,35 +1806,53 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
             </div>
           </div>
 
-          <div className="rounded-2xl p-5 h-fit" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal }}>Downloads</span>
-              <button onClick={toggleAllDownloads} className="text-xs font-medium" style={{ color: COLORS.orange }}>
-                {selectedDownloads.length === allKeys.length ? "Clear all" : "Select all"}
+          <div className="space-y-4">
+            {/* Always-visible shortcut to this sample's raw Zenodo archive,
+                keyed off record.category via GET /api/raw-data/links. */}
+            <div className="rounded-2xl p-4" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
+              <div className="text-sm font-semibold mb-2" style={{ color: COLORS.darkTeal }}>Raw Files</div>
+              <a
+                href={rawFilesUrl || undefined}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => { if (!rawFilesUrl) e.preventDefault(); }}
+                className="w-full flex items-center justify-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-lg text-white"
+                style={{ backgroundColor: rawFilesUrl ? COLORS.darkTeal : "#c9c9c9", cursor: rawFilesUrl ? "pointer" : "default" }}
+              >
+                <ExternalLink size={14} /> Download Raw Files (Zenodo)
+              </a>
+              {!rawLinks && (
+                <p className="text-[11px] mt-2" style={{ color: COLORS.inkSoft }}>Zenodo link is loading…</p>
+              )}
+            </div>
+
+            <div className="rounded-2xl p-5 h-fit" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal }}>Downloads</span>
+                <button onClick={toggleAllDownloads} className="text-xs font-medium" style={{ color: COLORS.orange }}>
+                  {selectedDownloads.length === allKeys.length ? "Clear all" : "Select all"}
+                </button>
+              </div>
+              <div className="space-y-2 mb-4">
+                {downloadItems.map((it) => (
+                  <label key={it.key} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer" style={{ backgroundColor: COLORS.paperAlt }}>
+                    <input type="checkbox" checked={selectedDownloads.includes(it.key)} onChange={() => toggleDownload(it.key)} style={{ accentColor: COLORS.orange }} />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: COLORS.ink }}>{it.label}</div>
+                      <div className="text-[11px] truncate" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>{it.sub}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <button
+                onClick={() => onMockAction(`${selectedDownloads.length} file(s) will be downloaded for ${record.id}.`)}
+                disabled={selectedDownloads.length === 0}
+                className="w-full flex items-center justify-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-lg text-white"
+                style={{ backgroundColor: selectedDownloads.length ? COLORS.orange : "#c9c9c9" }}
+              >
+                <Download size={14} /> Download Selected ({selectedDownloads.length})
               </button>
             </div>
-            <div className="space-y-2 mb-4">
-              {downloadItems.map((it) => (
-                <label key={it.key} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer" style={{ backgroundColor: COLORS.paperAlt }}>
-                  <input type="checkbox" checked={selectedDownloads.includes(it.key)} onChange={() => toggleDownload(it.key)} style={{ accentColor: COLORS.orange }} />
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate" style={{ color: COLORS.ink }}>{it.label}</div>
-                    <div className="text-[11px] truncate" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>{it.sub}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-            <button
-              onClick={() => onMockAction(`${selectedDownloads.length} file(s) will be downloaded for ${record.id}.`)}
-              disabled={selectedDownloads.length === 0}
-              className="w-full flex items-center justify-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-lg text-white"
-              style={{ backgroundColor: selectedDownloads.length ? COLORS.orange : "#c9c9c9" }}
-            >
-              <Download size={14} /> Download Selected ({selectedDownloads.length})
-            </button>
-            <a href="#" onClick={(e) => e.preventDefault()} className="inline-flex items-center gap-1 text-xs font-semibold mt-4" style={{ color: COLORS.medTeal }}>
-              View source record on NCBI <ExternalLink size={12} />
-            </a>
           </div>
         </div>
       </section>
@@ -1583,130 +1861,63 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
 }
 
 // ============================================================================
-// 11) ANALYSIS PAGE (mock analiz motoru, gerçek örneklerden rastgele seçim)
+// 11) RAW DATA PAGE (GERÇEK VERİ — GET /api/raw-data/links)
 // ============================================================================
-function AnalysisPage({ onMockAction }) {
-  const [fileName, setFileName] = useState(null);
-  const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef(null);
-  const [result, setResult] = useState(null);
-  const [running, setRunning] = useState(false);
+function RawDataPage() {
+  const [mode, setMode] = useState("category"); // "category" | "country"
+  const [links, setLinks] = useState(null);
   const [error, setError] = useState(null);
 
-  const handleFiles = (files) => { if (files && files[0]) setFileName(files[0].name); };
+  useEffect(() => {
+    apiGet("/api/raw-data/links").then(setLinks).catch((e) => setError(e.message));
+  }, []);
 
-  const runAnalysis = async () => {
-    if (!fileName) { onMockAction("Please upload a file first."); return; }
-    setRunning(true);
-    setError(null);
-    try {
-      const data = await apiPost("/api/mock/analysis/run", {});
-      setResult(data);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setRunning(false);
-    }
-  };
+  const activeMap = links ? (mode === "category" ? links.byCategory : links.byCountry) : null;
+  const entries = activeMap ? Object.entries(activeMap) : [];
 
   return (
     <div style={{ backgroundColor: COLORS.paper }} className="min-h-screen">
-      <section className="max-w-4xl mx-auto px-6 py-16">
+      <section className="max-w-5xl mx-auto px-6 py-16">
         <SectionTitle
-          title="Analysis"
-          subtitle="Upload a file in FASTA, GFA, or protein/DNA format and we'll surface the closest matches in our database."
+          title="Raw Data"
+          subtitle="Jump straight to the raw sequencing data archived on Zenodo, grouped by food category or by country of origin."
         />
-        <p className="mt-4 max-w-2xl text-sm leading-relaxed" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-          This tool compares your upload against every plasmid in GFPR and returns the 10 most similar samples.
-        </p>
 
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
-          onClick={() => inputRef.current?.click()}
-          className="mt-8 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer transition-colors"
-          style={{ border: `2px dashed ${dragOver ? COLORS.orange : COLORS.medTeal}`, backgroundColor: dragOver ? COLORS.lightTeal : "#fff", padding: "56px 24px" }}
-        >
-          <input ref={inputRef} type="file" className="hidden" accept=".fa,.fasta,.gfa,.faa,.ffn,.gff,.fna" onChange={(e) => handleFiles(e.target.files)} />
-          <div className="rounded-full p-4 mb-4" style={{ backgroundColor: COLORS.lightTeal }}>
-            <UploadCloud size={26} style={{ color: COLORS.darkTeal }} />
-          </div>
-          {fileName ? (
-            <div className="flex items-center gap-2 text-sm font-medium" style={{ color: COLORS.darkTeal }}>
-              <FileUp size={15} /> {fileName}
-            </div>
+        <div className="flex rounded-xl overflow-hidden mt-8 w-fit" style={{ border: `1.5px solid ${COLORS.line}` }}>
+          {[{ key: "category", label: "By Category" }, { key: "country", label: "By Country" }].map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setMode(opt.key)}
+              className="px-4 py-2.5 text-sm font-medium whitespace-nowrap"
+              style={{ backgroundColor: mode === opt.key ? COLORS.orange : "#fff", color: mode === opt.key ? "#fff" : COLORS.inkSoft, fontFamily: FONT_BODY }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {error && <div className="mt-8"><ErrorBlock message={error} /></div>}
+        {!error && !links && <LoadingBlock />}
+        {!error && links && (
+          entries.length === 0 ? (
+            <p className="text-sm mt-8" style={{ color: COLORS.inkSoft }}>No raw-data links available yet.</p>
           ) : (
-            <p className="text-sm font-medium" style={{ color: COLORS.ink }}>Drag a file here, or click to choose one</p>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between mt-5">
-          <div className="flex flex-wrap gap-2">
-            {[".fasta", ".fa", ".gfa", ".faa", ".gff"].map((f) => (
-              <span key={f} className="text-[11px] px-2.5 py-1 rounded-full" style={{ backgroundColor: COLORS.paperAlt, color: COLORS.inkSoft, fontFamily: FONT_MONO }}>{f}</span>
-            ))}
-          </div>
-          <button onClick={runAnalysis} disabled={running} className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ backgroundColor: COLORS.orange }}>
-            {running ? "Running..." : "Run Analysis"}
-          </button>
-        </div>
-
-        {error && <div className="mt-6"><ErrorBlock message={error} /></div>}
-
-        {result && (
-          <>
-            <div className="mt-10 rounded-2xl p-5" style={{ backgroundColor: COLORS.lightTeal }}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-xs uppercase tracking-wide font-semibold" style={{ color: COLORS.darkTeal, fontFamily: FONT_MONO }}>Predicted Origin</div>
-                <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: COLORS.yellow, color: COLORS.deepOrange, fontFamily: FONT_MONO }}>mock</span>
-              </div>
-              {result.predictedOrigin && (
-                <div className="text-lg font-semibold" style={{ fontFamily: FONT_DISPLAY, color: COLORS.darkTeal }}>
-                  {catLabel(result.predictedOrigin.category)} · {result.predictedOrigin.type} · {result.predictedOrigin.host} · {result.predictedOrigin.country}
-                </div>
-              )}
-              <p className="text-sm mt-1" style={{ color: COLORS.darkTeal }}>{result.note}</p>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+              {entries.map(([key, url]) => (
+                <a
+                  key={key}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between gap-2 rounded-xl px-4 py-3.5 text-sm font-medium transition-colors"
+                  style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}`, color: COLORS.darkTeal }}
+                >
+                  <span className="truncate">{mode === "category" ? catLabel(key) : key}</span>
+                  <ExternalLink size={14} style={{ color: COLORS.orange, flexShrink: 0 }} />
+                </a>
+              ))}
             </div>
-
-            <div className="mt-6 rounded-2xl p-5" style={{ backgroundColor: "#fff", border: `1px solid ${COLORS.line}` }}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold" style={{ color: COLORS.darkTeal }}>10 Closest Samples</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: COLORS.yellow, color: COLORS.deepOrange, fontFamily: FONT_MONO }}>
-                  mock — similarity motoru bağlanmadı, örnekler gerçek DB'den rastgele
-                </span>
-              </div>
-              <table className="w-full text-sm mt-3" style={{ fontFamily: FONT_BODY }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                    <th className="text-left py-2 text-xs font-semibold" style={{ color: COLORS.inkSoft }}>ID</th>
-                    <th className="text-left py-2 text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Similarity</th>
-                    <th className="text-left py-2 text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Category</th>
-                    <th className="text-left py-2 text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Type</th>
-                    <th className="text-left py-2 text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Host</th>
-                    <th className="text-left py-2 text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Country</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.matches.map((m) => (
-                    <tr key={m.id} style={{ borderBottom: `1px solid ${COLORS.paperAlt}` }}>
-                      <td className="py-2.5" style={{ fontFamily: FONT_MONO, color: COLORS.darkTeal }}>{m.id}</td>
-                      <td className="py-2.5">{m.similarity}%</td>
-                      <td className="py-2.5">
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: catColor(m.category) }} />
-                          {catLabel(m.category)}
-                        </span>
-                      </td>
-                      <td className="py-2.5" style={{ color: COLORS.inkSoft }}>{m.type}</td>
-                      <td className="py-2.5 italic" style={{ color: COLORS.inkSoft }}>{m.host}</td>
-                      <td className="py-2.5" style={{ color: COLORS.inkSoft }}>{m.country}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+          )
         )}
       </section>
     </div>
@@ -1851,7 +2062,7 @@ export default function GFPRWebsite() {
   else if (page === "data") PageComponent = <DataAccessPage onMockAction={showNotice} onOpenSample={openSample} initialFilter={pendingFilter} />;
   else if (page === "sampleDetail") {
     PageComponent = <SampleDetailPage recordId={selectedRecordId} onBack={backToData} onMockAction={showNotice} />;
-  } else if (page === "analysis") PageComponent = <AnalysisPage onMockAction={showNotice} />;
+  } else if (page === "rawdata") PageComponent = <RawDataPage />;
   else if (page === "contact") PageComponent = <ContactPage onMockAction={showNotice} />;
 
   const activeTab = page === "sampleDetail" ? "data" : page;

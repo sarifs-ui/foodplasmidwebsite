@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+backend/data/*.tsv
+backend/data/*.db
+backend/data/pfam_ko/
