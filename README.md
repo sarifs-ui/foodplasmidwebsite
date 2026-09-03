@@ -1,139 +1,167 @@
 # GFPR — Global Food Plasmidome Resource
 
-An open, browsable catalog of plasmid data mined from food-derived metagenomic
-samples — antibiotic-resistance genes, enzymes, and other functional
-annotations, searchable by food category, country, host organism, and more.
+An open, browsable catalogue of plasmids mined from food-derived metagenomic
+samples — antimicrobial resistance genes, carbohydrate-active enzymes,
+CRISPR-Cas systems and other functional annotations, searchable by food
+category, country and host organism.
 
+## Quick start
 
-
-## What's in this repo
-
-- A single-page React app (`src/App.jsx`) with five views — Home, About
-  GFPR, Data Access, Analysis, and Contact — navigated with in-app state
-  (no router).
-- Built with **React + Vite** and styled with **Tailwind CSS**.
-- Icons from `lucide-react` and `react-icons`.
-- Images referenced by the app live in `public/images/`.
-
-## Requirements
-
-You only need two things installed:
-
-- **[Node.js](https://nodejs.org/)** — version 18 or newer (LTS recommended).
-  Installing Node also installs **npm** automatically.
-- A terminal (Terminal on macOS/Linux, PowerShell or Command Prompt on
-  Windows).
-
-To check what you already have, open a terminal and run:
+You need **Node.js 18+** ([nodejs.org](https://nodejs.org/)) and nothing else —
+no Python, no database server, no API keys.
 
 ```bash
-node -v
-npm -v
+git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
+cd foodplasmidwebsite
+npm install
+npm start
 ```
 
-If either command fails, install Node.js from the link above and try again.
+Then open **<http://localhost:4000>**.
 
-## Running it locally
+That is the whole setup. `npm install` imports the bundled sample table, so a
+fresh clone renders **every figure and every page with real data** — no extra
+downloads.
 
-1. **Clone the repository**
+## How it runs
+
+Everything is served from a **single port**. The Express backend serves both the
+JSON API and the built React frontend:
+
+```
+http://localhost:4000
+  ├── /api/*   → JSON API (Express)
+  └── /*       → React app (frontend/dist)
+```
+
+Because both come from the same origin, the frontend calls the API with plain
+relative paths (`/api/samples`) — there is no host or port to configure.
+
+## Data
+
+The dataset splits into three tiers by size. This is what makes a bare clone
+work without a multi-hundred-megabyte download.
+
+| Tier | Contents | Size | In the repo? |
+|---|---|---|---|
+| **A** — source tables | `metadata.csv`, `chord.csv`, `amr-rgi-consensus.csv`, `cazyme.csv`, `amp_all.csv`, `cctyper.csv`, `acp_all.csv` | ~12 MB | **yes** |
+| **B** — derived artifact | `gfpr.derived.json` — taxonomy tree, host per run, top Pfam/KO terms | ~410 KB | **yes** |
+| **C** — heavy sources | `family_assigned.csv` (69 MB), `merged_pfam_kofam.csv` (319 MB) | ~390 MB | no |
+
+**`metadata.csv` is the master table.** Its `Run_ID` column is the primary key
+for the whole project: every annotation file joins on it at 100% coverage. Note
+that the file ends with a `Total` summary row, which the importer drops — if a
+headline number ever looks exactly doubled, that row got through.
+
+**`chord.csv` is an external input, not a derivative.** It is the published
+category × feature-class matrix and cannot be recomputed from the other files;
+three of its six classes (heat resistance, heavy-metal resistance, virulence)
+have no per-gene source at all.
+
+### Without Tier C
+
+Tier C only adds **gene-level hit lists** on the sample detail page and the
+`pfam_ko` / `host_taxonomy` tables in exports. Everything else — all five
+figures, the taxonomy tree, host labels, per-sample Pfam/KO *counts*, filters,
+and metadata export — works from Tiers A and B alone.
+
+To load Tier C, place the two files in `backend/data/` and run:
 
 ```bash
-   git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
-   cd foodplasmidwebsite
+npm run import-annotations   # builds backend/data/gfpr.db (~500 MB, ~40 s)
+npm run build-derived        # regenerates gfpr.derived.json from them
 ```
 
-2. **Install dependencies**
+`build-derived` refuses to run without both heavy files, so a contributor who
+lacks them cannot accidentally commit a blanked artifact.
 
-   ```bash
-   npm install
-   ```
+## Commands
 
-   This reads `package.json` and downloads everything the project needs into
-   a local `node_modules/` folder. It can take a minute or two the first
-   time — that's normal.
+Run these from the repository root.
 
-3. **Start the dev server**
+| Command | What it does |
+|---|---|
+| `npm install` | Installs both workspaces and imports the sample table |
+| `npm start` | Builds the frontend, then serves everything on port 4000 |
+| `npm run dev` | Development mode with hot reload (API on 4000, Vite on 5173) |
+| `npm run build` | Builds the frontend into `frontend/dist/` |
+| `npm run serve` | Serves without rebuilding |
+| `npm run lint` | Lints the frontend with oxlint |
+| `npm run import-data` | Re-imports the sample table from `metadata.csv` |
+| `npm run import-annotations` | Imports the gene-level annotation database (needs Tier C) |
+| `npm run build-derived` | Regenerates `gfpr.derived.json` (needs Tier C) |
 
-   ```bash
-   npm run dev
-   ```
+## API
 
-   The terminal will print a local address, typically:
+| Method | Path | Returns |
+|---|---|---|
+| `GET` | `/api/health` | Status, sample count, which tiers are loaded |
+| `GET` | `/api/stats/overview` | Headline counters |
+| `GET` | `/api/stats/category-share` | Samples per food category |
+| `GET` | `/api/stats/contig-share` | Plasmid contigs per food category |
+| `GET` | `/api/stats/annotation-flow` | Category × feature-class matrix (chord) |
+| `GET` | `/api/stats/taxonomy` | Phylum→family tree with category composition |
+| `GET` | `/api/stats/map` | Per-country counts, with ISO alpha-3 and numeric codes |
+| `GET` | `/api/samples` | Paged, filterable sample list |
+| `GET` | `/api/samples/filters` | Distinct values for each filter |
+| `GET` | `/api/samples/:id` | One sample plus its annotations |
+| `POST` | `/api/downloads/export` | Streams a zip of metadata + annotation CSVs |
+| `GET` | `/api/raw-data/links` | Registry of external raw-contig archives |
+| `POST` | `/api/contact` | Contact form (logs to the server; no mail transport) |
 
-   ```
-   Local:   http://localhost:5173/
-   ```
+## Docker
 
-   Open that address in your browser. The site supports hot-reload, so any
-   code change shows up instantly without restarting the server.
-
-4. **Stop the server** anytime with `Ctrl + C` in the terminal.
-
-That's it — no environment variables, API keys, or database setup are
-required, since the app runs entirely on mock data in the browser.
-
-### Optional: production build
-
-If you want to generate a static, deployable build instead of the dev
-server:
+Everything ships as **one image**, serving the API and the built UI from a
+single port.
 
 ```bash
-npm run build      # outputs to dist/
-npm run preview    # serve that build locally to sanity-check it
+docker build -t gfpr .
+docker run --rm -p 4000:4000 gfpr
 ```
 
-## Backend Data Setup
+Open <http://localhost:4000>. The image bakes in Tiers A and B, so it runs
+standalone with real data. To add Tier C, mount the database:
 
-The `backend data` folder is stored separately on Google Drive to save space. To use it locally:
+```bash
+docker run --rm -p 4000:4000 \
+  -v "$PWD/backend/data/gfpr.db:/app/backend/data/gfpr.db:ro" \
+  gfpr
+```
 
-1. **Download the folder** from here:  
-   [Google Drive: Backend Data](https://drive.google.com/drive/folders/1AaSt8wzpDxTFCcZCJ3rjkLW4vA7i6wbi?usp=sharing)
-
-2. **Create a `backend data` folder** in your project root (same level as `package.json`)
-
-3. **Extract the downloaded files** into that folder
-
-After this, the backend data will be available for local development.
+Change the port with `-e PORT=8080 -p 8080:8080`.
 
 ## Project structure
 
 ```
 .
-├── public/
-│   └── images/        # photos used by the masthead and home page cards
-├── src/
-│   ├── App.jsx         # the entire app — all pages/components live here
-│   └── ...              # standard Vite/React entry files (main.jsx, index.css, etc.)
-├── package.json
-└── README.md
+├── package.json              # workspace root — every command lives here
+├── Dockerfile                # single image: API + built frontend
+├── backend/
+│   ├── data/                 # source CSVs (tiers A/B committed, C ignored)
+│   └── src/
+│       ├── config/           # paths, env, country table, annotation registry
+│       ├── data/             # cached loaders: samples, derived, SQLite
+│       ├── ingest/           # importers
+│       │   ├── lib/          # CSV reader, coercion, bulk load, dataset specs
+│       │   └── sources/      # one module per source file
+│       ├── api/              # routes, controllers, services
+│       └── utils/            # CSV writer
+└── frontend/
+    ├── src/
+    │   ├── api/              # fetch client + useApi hook
+    │   ├── theme/            # design tokens, global styles
+    │   ├── domain/           # categories, annotations, navigation
+    │   ├── lib/              # SVG geometry
+    │   ├── components/       # ui/ atoms, figures/ charts
+    │   └── pages/            # one module per route
+    └── vite.config.js        # dev proxy for /api
 ```
 
-## Notes for reviewers
+## Configuration
 
-- Nothing here writes to a real backend — filters, downloads, the contact
-  form, and the "Analysis" upload are all mocked (you'll see a toast
-  notification instead of an actual file download or email send).
-- The world map on the **About GFPR** page uses a public-domain basemap
-  (Natural Earth data via [Wikimedia
-  Commons](https://commons.wikimedia.org/wiki/File:BlankMap-Equirectangular.svg),
-  CC0) — no API key or attribution payment needed, it's loaded directly by
-  URL.
-- If images don't appear, confirm the files referenced in `src/App.jsx`
-  (search for `HERO_IMAGE_URL` and `HOME_CARDS`) actually exist under
-  `public/images/` with matching filenames — filenames are case-sensitive.
+Every setting has a working default, so **no `.env` file is required**. To
+override something, copy `backend/.env.example` to `backend/.env`; the most
+useful knob is `PORT`.
 
-## Troubleshooting
-
-| Problem | Likely fix |
-|---|---|
-| `npm install` fails | Make sure Node.js is 18+ (`node -v`). Delete `node_modules/` and `package-lock.json`, then retry. |
-| Port 5173 is already in use | Vite will automatically try the next free port and print it — just use the URL it shows. |
-| Page loads blank / console errors about missing modules | Run `npm install` again — a dependency likely didn't finish installing. |
-| Images are broken (broken-image icons) | Check that the exact filenames in `public/images/` match what `src/App.jsx` expects (see above). |
-
-## License / Credits
-
-- App code: add a license here if you'd like this to be reusable (e.g. MIT).
-- Sample/masthead photography: supplied by the project team.
-- World map basemap: Natural Earth data, via Wikimedia Commons, public
-  domain (CC0).
+The frontend understands `VITE_API_BASE`, empty by default (same origin). Set it
+only if the UI should talk to a backend on another host.

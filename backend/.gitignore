@@ -1,6 +1,15 @@
 node_modules/
 .env
-data/gfpr.json
-backend/data/*.tsv
-backend/data/*.db
-backend/data/pfam_ko/
+
+# Only the small source CSVs and the derived artifact belong in the repository.
+# Everything else in data/ — the two multi-hundred-megabyte source files and
+# the generated SQLite database — stays out.
+data/*
+!data/metadata.csv
+!data/chord.csv
+!data/amr-rgi-consensus.csv
+!data/cazyme.csv
+!data/amp_all.csv
+!data/cctyper.csv
+!data/acp_all.csv
+!data/gfpr.derived.json

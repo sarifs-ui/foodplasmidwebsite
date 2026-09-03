@@ -1,5 +1,5 @@
 {
-  "_AI_NOTE": "Bu dosya KOD DEĞİL, elle güncellenen statik bir veridir. Kategori/ülke bazlı zip'ler Zenodo'ya yüklendikçe buraya gerçek linkler eklenecek. GET /api/raw-data/links bu dosyayı olduğu gibi döner. byCategory anahtarları frontend'deki CATEGORIES listesindeki 'key' değerleriyle (örn. 'dairy', 'alcohol') birebir eşleşmeli. byCountry anahtarları ana samples verisindeki ülke koduyla (örn. 'TUR', 'USA') birebir eşleşmeli. Bir kategori/ülke için henüz Zenodo linki yoksa o anahtarı HİÇ eklemeyin — boş string eklemeyin, frontend'de tıklanabilir ama kırık bir link olarak görünür.",
+  "_note": "Hand-maintained data, not code. Add real Zenodo URLs as per-category and per-country archives are published. GET /api/raw-data/links returns this file as-is. Keys in byCategory must match the category values in metadata.csv exactly (e.g. 'dairy', 'alcohol'); keys in byCountry must match the ISO3 country codes (e.g. 'TUR', 'USA'). Omit a key entirely when there is no link yet — an empty string renders as a clickable but broken link.",
   "byCategory": {},
   "byCountry": {}
 }

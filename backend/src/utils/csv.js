@@ -1,24 +1,26 @@
-// NOTE: Harici bir CSV kütüphanesi eklemeye gerek yok, indirdiğimiz
-// veri basit (virgül/tırnak/yeni satır içerebilecek metin alanları var
-// ama nadiren) — bu küçük stringifier yeterli ve bağımlılık eklemiyor.
-
-function escapeCsvValue(value) {
+/**
+ * Minimal RFC 4180 CSV writer.
+ *
+ * The exported data is simple enough that a dependency is not warranted; this
+ * only needs to quote the three characters that would otherwise break a field.
+ */
+function escapeValue(value) {
   if (value === null || value === undefined) return "";
-  const str = String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
+  const text = String(value);
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
 }
 
-// rows: array of plain objects. Sütun sırası ilk satırın anahtar sırasıyla
-// belirlenir. Boş dizi verilirse sadece "" (boş içerik) döner.
+/**
+ * Serialise an array of plain objects. Column order follows the first row's
+ * keys. An empty array yields an empty string.
+ */
 export function rowsToCsv(rows) {
   if (!rows || rows.length === 0) return "";
   const headers = Object.keys(rows[0]);
-  const lines = [headers.join(",")];
+  const lines = [headers.map(escapeValue).join(",")];
   for (const row of rows) {
-    lines.push(headers.map((h) => escapeCsvValue(row[h])).join(","));
+    lines.push(headers.map((h) => escapeValue(row[h])).join(","));
   }
   return lines.join("\n");
 }

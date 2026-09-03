@@ -22,6 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-backend/data/*.tsv
-backend/data/*.db
-backend/data/pfam_ko/
+# Office geçici kilit dosyaları
+~$*
+
+# Windows/WSL indirme artıkları
+*:Zone.Identifier
+
+# --- Büyük veri dosyaları ---
+# Ayrıntılı kurallar backend/.gitignore içinde: data/ klasöründe sadece
+# küçük kaynak dosyalar (All_Data.csv, acp.csv, *.py) repoya girer; import
+# çıktıları ve Google Drive paketi yok sayılır.

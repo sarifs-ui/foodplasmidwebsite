@@ -1,0 +1,29 @@
+{
+  "name": "gfpr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GFPR \u2014 Global Food Plasmidome Resource (API + web UI on a single port)",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "postinstall": "npm run import-data",
+    "import-data": "npm run import-data --workspace backend",
+    "import-annotations": "npm run import-annotations --workspace backend",
+    "build": "npm run build --workspace frontend",
+    "start": "npm run build && npm run serve",
+    "serve": "node backend/src/server.js",
+    "dev": "concurrently --names api,web --prefix-colors blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --watch backend/src/server.js",
+    "dev:web": "npm run dev --workspace frontend",
+    "lint": "npm run lint --workspace frontend",
+    "build-derived": "npm run build-derived --workspace backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
