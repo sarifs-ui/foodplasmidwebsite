@@ -25,18 +25,18 @@ export function listSamples(req, res) {
   if (fermented === "false" || fermented === "0") data = data.filter((r) => r.fermented === false);
 
   // hostTaxonomy filtresi: host_taxonomy tablosunda phylum/class/order/family/genus/species
-  // eşleşen sample_id'leri bul, sonra o ID'lerle kesişim yap.
+  // eşleşen run_id'leri bul, sonra o ID'lerle kesişim yap.
   if (hostTaxonomy && tableExists("host_taxonomy")) {
     try {
       const needle = `%${hostTaxonomy}%`;
       const rows = db
         .prepare(
-          `SELECT DISTINCT sample_id FROM host_taxonomy
+          `SELECT DISTINCT run_id FROM host_taxonomy
            WHERE phylum LIKE ? OR class LIKE ? OR order_name LIKE ?
               OR family LIKE ? OR genus LIKE ? OR species LIKE ?`
         )
         .all(needle, needle, needle, needle, needle, needle);
-      const matchedIds = new Set(rows.map((r) => r.sample_id));
+      const matchedIds = new Set(rows.map((r) => r.run_id));
       data = data.filter((r) => matchedIds.has(r.run_id) || matchedIds.has(r.sample_id));
     } catch {
       // host_taxonomy yoksa veya hata olursa filtre uygulanmaz
@@ -72,7 +72,6 @@ export function listSamples(req, res) {
 
 // Annotation hit'lerini SQLite DB'den run_id kullanarak çeker.
 // Her annotation tipi için ayrı bir tablo sorgusu yapılır.
-// NOT: cazyme tablosu run_id sütunu ile indexlendi; diğerleri sample_id ile.
 function getAnnotationsFromDb(runId) {
   if (!runId) return [];
 
@@ -141,7 +140,24 @@ function getAnnotationsFromDb(runId) {
         .map((r) => r[labelCol])
         .filter(Boolean)
         .filter((v, i, a) => a.indexOf(v) === i); // deduplicate
-      return { key, count: rows.length, hits };
+
+      let extra = {};
+      if (key === "cgc") {
+        try {
+          const cgcGenes = db
+            .prepare(
+              `SELECT cgc_num, gene_type, contig_id, gene_start, gene_stop, gene_strand, gene_annotation, recommend_results, substrate, cazy_category, category, cluster_start, cluster_end, length_bp 
+               FROM cgc WHERE run_id = ? 
+               ORDER BY COALESCE(cluster_start, gene_start, 0), gene_start ASC LIMIT 200`
+            )
+            .all(runId);
+          extra.cgcGenes = cgcGenes;
+        } catch {
+          extra.cgcGenes = [];
+        }
+      }
+
+      return { key, count: rows.length, hits, ...extra };
     } catch {
       return { key, count: 0, hits: [] };
     }
@@ -151,11 +167,28 @@ function getAnnotationsFromDb(runId) {
 // GET /api/samples/:id
 // Annotation hit'leri artık SQLite gfpr.db'den run_id ile çekiliyor.
 export function getSampleById(req, res) {
-  const row = readAll().find((r) => r.sample_id === req.params.id);
+  const row = readAll().find((r) => r.sample_id === req.params.id || r.run_id === req.params.id);
   if (!row) return res.status(404).json({ error: "Sample not found" });
 
   // run_id ile SQLite'tan gerçek anotasyonları çek
   const annotations = getAnnotationsFromDb(row.run_id);
+
+  // host bilgisi boşsa host_taxonomy tablosundan tamamlamayı dene
+  let host = row.host;
+  if (!host && tableExists("host_taxonomy")) {
+    try {
+      const taxRow = db
+        .prepare(
+          `SELECT species, genus, family FROM host_taxonomy 
+           WHERE run_id = ? AND species IS NOT NULL AND species != 'Unclassified' 
+           LIMIT 1`
+        )
+        .get(row.run_id);
+      if (taxRow) {
+        host = taxRow.species || taxRow.genus || taxRow.family;
+      }
+    } catch {}
+  }
 
   res.json({
     id: row.sample_id,
@@ -169,7 +202,7 @@ export function getSampleById(req, res) {
     country: row.country,
     year: row.year,
     databaseOrigin: row.database_origin,
-    host: row.host,
+    host: host,
     plasmidContigCounts: row.plasmid_contig_counts,
     classified: row.classified,
     unclassified: row.unclassified,

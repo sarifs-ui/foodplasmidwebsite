@@ -1733,6 +1733,135 @@ function InfoRow({ label, children }) {
   );
 }
 
+const GENE_TYPE_COLORS = {
+  CAZyme: "#2A7B7B",
+  GH: "#2A7B7B",
+  GT: "#539E9E",
+  PL: "#27AE60",
+  CE: "#F39C12",
+  CBM: "#3498DB",
+  TC: "#EB7F00",
+  TF: "#E74C3C",
+  STP: "#9B59B6",
+  Other: "#7F8C8D"
+};
+
+function getGeneColor(gene) {
+  if (gene.category && GENE_TYPE_COLORS[gene.category]) return GENE_TYPE_COLORS[gene.category];
+  if (gene.cazy_category && GENE_TYPE_COLORS[gene.cazy_category]) return GENE_TYPE_COLORS[gene.cazy_category];
+  if (gene.gene_type && GENE_TYPE_COLORS[gene.gene_type]) return GENE_TYPE_COLORS[gene.gene_type];
+  return GENE_TYPE_COLORS.Other;
+}
+
+function CgcGeneDiagram({ genes }) {
+  if (!genes || genes.length === 0) return null;
+
+  const clusters = useMemo(() => {
+    const map = {};
+    for (const g of genes) {
+      const key = g.cgc_num || (g.contig_id ? `Contig ${g.contig_id}` : "Cluster 1");
+      if (!map[key]) map[key] = [];
+      map[key].push(g);
+    }
+    return map;
+  }, [genes]);
+
+  const legendItems = useMemo(() => {
+    const types = new Set();
+    for (const g of genes) {
+      const label = g.category || g.cazy_category || g.gene_type || "Other";
+      types.add(label);
+    }
+    return Array.from(types).map((t) => ({
+      label: t,
+      color: GENE_TYPE_COLORS[t] || GENE_TYPE_COLORS.Other,
+    }));
+  }, [genes]);
+
+  return (
+    <div className="mt-3 space-y-4">
+      {Object.entries(clusters).map(([clusterName, clusterGenes]) => {
+        const starts = clusterGenes.map((g) => g.gene_start ?? g.cluster_start ?? 0).filter((v) => v !== null);
+        const stops = clusterGenes.map((g) => g.gene_stop ?? g.cluster_end ?? 1000).filter((v) => v !== null);
+        const minBp = Math.min(...starts, 0);
+        const maxBp = Math.max(...stops, 1000);
+        const span = Math.max(maxBp - minBp, 1);
+
+        const svgWidth = 560;
+        const rowHeight = 36;
+        const paddingX = 45;
+        const availableWidth = svgWidth - paddingX * 2;
+
+        return (
+          <div key={clusterName} className="p-3.5 rounded-xl border" style={{ backgroundColor: COLORS.paperAlt, borderColor: COLORS.line }}>
+            <div className="flex items-center justify-between text-xs font-semibold mb-2" style={{ color: COLORS.darkTeal, fontFamily: FONT_MONO }}>
+              <span>{clusterName}</span>
+              <span className="text-[11px] font-normal" style={{ color: COLORS.inkSoft }}>
+                {minBp.toLocaleString()} bp – {maxBp.toLocaleString()} bp (span: {span.toLocaleString()} bp)
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <svg viewBox={`0 0 ${svgWidth} ${clusterGenes.length * rowHeight + 30}`} className="w-full text-xs" style={{ minWidth: 440, height: "auto" }}>
+                {/* Coordinate Backbone */}
+                <line x1={paddingX} y1={18} x2={svgWidth - paddingX} y2={18} stroke={COLORS.line} strokeWidth={2} strokeDasharray="3 3" />
+                <text x={paddingX} y={11} fill={COLORS.inkSoft} fontSize={9.5} textAnchor="start" fontFamily={FONT_MONO}>{minBp} bp</text>
+                <text x={svgWidth - paddingX} y={11} fill={COLORS.inkSoft} fontSize={9.5} textAnchor="end" fontFamily={FONT_MONO}>{maxBp} bp</text>
+
+                {/* Gene Arrows */}
+                {clusterGenes.map((g, idx) => {
+                  const gStart = g.gene_start ?? minBp;
+                  const gStop = g.gene_stop ?? maxBp;
+                  const x1 = paddingX + ((Math.min(gStart, gStop) - minBp) / span) * availableWidth;
+                  const x2 = paddingX + ((Math.max(gStart, gStop) - minBp) / span) * availableWidth;
+                  const width = Math.max(x2 - x1, 26);
+                  const y = 28 + idx * rowHeight;
+                  const height = 18;
+                  const isReverse = g.gene_strand === "-";
+                  const color = getGeneColor(g);
+                  const label = g.recommend_results || g.gene_annotation || g.gene_type || "Gene";
+
+                  const arrowHead = Math.min(8, width / 2);
+                  let path = "";
+                  if (!isReverse) {
+                    path = `M ${x1} ${y} L ${x2 - arrowHead} ${y} L ${x2} ${y + height / 2} L ${x2 - arrowHead} ${y + height} L ${x1} ${y + height} Z`;
+                  } else {
+                    path = `M ${x1 + arrowHead} ${y} L ${x2} ${y} L ${x2} ${y + height} L ${x1 + arrowHead} ${y + height} L ${x1} ${y + height / 2} Z`;
+                  }
+
+                  return (
+                    <g key={idx} className="group cursor-pointer">
+                      <title>{`${label}\nCoordinates: ${gStart} - ${gStop} bp (${g.gene_strand || "+"})\nType: ${g.gene_type || "-"}\nSubstrate: ${g.substrate || "-"}`}</title>
+                      <path d={path} fill={color} stroke="#fff" strokeWidth={1.5} className="transition-opacity hover:opacity-85" />
+                      <text x={isReverse ? x2 + 5 : x1 - 5} y={y + height / 2 + 3} fill={COLORS.inkSoft} fontSize={8.5} textAnchor={isReverse ? "start" : "end"} fontFamily={FONT_MONO}>
+                        {gStart}..{gStop}
+                      </text>
+                      <text x={x1 + width / 2} y={y + height / 2 + 3.5} fill="#fff" fontSize={9} fontWeight={600} textAnchor="middle" className="pointer-events-none">
+                        {label.length > 18 ? label.slice(0, 16) + "…" : label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-3 pt-1 border-t" style={{ borderColor: COLORS.paperAlt }}>
+        <span className="text-[11px] font-semibold" style={{ color: COLORS.inkSoft }}>Gene Legend:</span>
+        {legendItems.map((item) => (
+          <div key={item.label} className="flex items-center gap-1.5 text-xs">
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: item.color }} />
+            <span style={{ color: COLORS.ink, fontSize: 11 }}>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SampleDetailPage({ recordId, onBack, onMockAction }) {
   const [record, setRecord] = useState(null);
   const [error, setError] = useState(null);
@@ -1837,15 +1966,19 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
                       <div className="text-sm" style={{ fontWeight: 700, color: COLORS.ink, fontFamily: FONT_BODY }}>
                         {ANNOTATION_LABELS[a.key] || a.key} <em style={{ fontWeight: 400, color: COLORS.inkSoft, marginLeft: 4 }}>{a.count} hit{a.count !== 1 && "s"}</em>
                       </div>
-                      <div className="mt-1 space-y-0.5">
-                        {a.hits.length === 0 ? (
-                          <div className="text-sm" style={{ color: COLORS.inkSoft }}>—</div>
-                        ) : a.hits.map((h) => (
-                          <div key={h} className="text-sm" style={{ fontWeight: 400, color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-                            {h}
-                          </div>
-                        ))}
-                      </div>
+                      {a.key === "cgc" && a.cgcGenes && a.cgcGenes.length > 0 ? (
+                        <CgcGeneDiagram genes={a.cgcGenes} />
+                      ) : (
+                        <div className="mt-1 space-y-0.5">
+                          {a.hits.length === 0 ? (
+                            <div className="text-sm" style={{ color: COLORS.inkSoft }}>—</div>
+                          ) : a.hits.map((h) => (
+                            <div key={h} className="text-sm" style={{ fontWeight: 400, color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
+                              {h}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

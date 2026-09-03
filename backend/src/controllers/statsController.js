@@ -1,24 +1,7 @@
 import { readAll } from "../config/store.js";
 import { centroidFor, countryName } from "../config/countries.js";
-// NOTE: getOverview/getCategoryShare/getAnnotationFlow/getMapData
-// (yukarıdaki fonksiyonlar) BİLEREK değiştirilmedi, hâlâ eski gfpr.json
-// tabanlı veriyi kullanıyorlar. getTaxonomy (en alttaki YENİ fonksiyon) ise
-// bambaşka bir kaynaktan, config/db.js'teki SQLite host_taxonomy
-// tablosundan (hotspot.tsv'den import edilen) okuyor — importAllData.js
-// çalıştırılmadıysa bu tablo yok olabilir, o durumu da ele alıyor.
 import { db, tableExists } from "../config/db.js";
 
-// Annotation sütunları artık metin listesi ("AMINOGLYCOSIDE, TETRACYCLINE").
-// Hit sayısı bu listenin eleman sayısından hesaplanıyor — samplesController
-// ile aynı mantık.
-function hitCount(text) {
-  if (!text) return 0;
-  return text.split(",").map((s) => s.trim()).filter(Boolean).length;
-}
-
-// Frontend'deki (RibbonChord) hedef anahtarlar backend alan adlarıyla
-// birebir aynı değil ("crispr" -> "crispr_cas", "pfam_kegg" -> "pfam_ko").
-// Bu eşleme tek yerde tutuluyor ki iki taraf da tutarlı kalsın.
 const ANNOTATION_FIELD_MAP = {
   amr: "amr",
   cazyme: "cazyme",
@@ -29,11 +12,17 @@ const ANNOTATION_FIELD_MAP = {
   pfam_kegg: "pfam_ko",
 };
 
+const ANNOTATION_TABLE_MAP = {
+  amr:       { table: "amr",       idCol: "run_id" },
+  cazyme:    { table: "cazyme",    idCol: "run_id" },
+  cgc:       { table: "cgc",       idCol: "run_id" },
+  crispr:    { table: "crispr_cas",idCol: "run_id" },
+  amp:       { table: "amp",       idCol: "run_id" },
+  acp:       { table: "acp",       idCol: "run_id" },
+  pfam_kegg: { table: "pfam_ko",   idCol: "run_id" },
+};
+
 // GET /api/stats/overview
-// NOTE: "hosts" sayısı önce SQLite host_taxonomy tablosundan (hotspot.tsv'ın
-// Species sütunu) çekilmeye çalışılır — bu veriler filogen*etik sınıflandırmayı
-// kapsıyor ve daha doğru. Tablo yoksa Excel'deki (gfpr.json) host alanına
-// düşer.
 export function getOverview(req, res) {
   const data = readAll();
 
@@ -43,8 +32,6 @@ export function getOverview(req, res) {
   const databaseOrigins = Array.from(new Set(data.map((r) => r.database_origin).filter(Boolean))).sort();
   const totalPlasmidContigs = data.reduce((sum, r) => sum + (Number(r.plasmid_contig_counts) || 0), 0);
 
-  // Host tür sayısı: host_taxonomy tablosu varsa oradan (species seviyesi),
-  // yoksa gfpr.json'daki host alanından say.
   let hosts;
   if (tableExists("host_taxonomy")) {
     try {
@@ -65,7 +52,6 @@ export function getOverview(req, res) {
 }
 
 // GET /api/stats/category-share
-// Kategori başına örnek sayısının toplam içindeki yüzdesi (1 ondalık).
 export function getCategoryShare(req, res) {
   const data = readAll();
   const total = data.length || 1;
@@ -84,48 +70,27 @@ export function getCategoryShare(req, res) {
 }
 
 // GET /api/stats/annotation-flow
-// Figure A (chord diagram) için: her kategorinin her annotation tipinde
-// kaç FARKLI ID ile çalıştığı (COUNT DISTINCT). Genişlik bu sayıya göre
-// belirlenir; cazyme tablosu run_id sütunuyla indexlendi.
 export function getAnnotationFlow(req, res) {
   const data = readAll();
 
-  // Kategori başına run_id ve sample_id listesi oluştur
   const catToRunIds = {};
-  const catToSampleIds = {};
   for (const r of data) {
     if (!r.category) continue;
     if (r.run_id) {
       if (!catToRunIds[r.category]) catToRunIds[r.category] = [];
       catToRunIds[r.category].push(r.run_id);
     }
-    if (r.sample_id) {
-      if (!catToSampleIds[r.category]) catToSampleIds[r.category] = [];
-      catToSampleIds[r.category].push(r.sample_id);
-    }
   }
 
-  const annotationTableMap = {
-    amr:       { table: "amr",       idCol: "run_id" },
-    cazyme:    { table: "cazyme",    idCol: "run_id" },
-    cgc:       { table: "cgc",       idCol: "run_id" },
-    crispr:    { table: "crispr_cas",idCol: "run_id" },
-    amp:       { table: "amp",       idCol: "run_id" },
-    acp:       { table: "acp",       idCol: "run_id" },
-    pfam_kegg: { table: "pfam_ko",   idCol: "run_id" },
-  };
-
-  const targetKeys = Object.keys(annotationTableMap);
-
-  // Kategori başına annotation tiplerini COUNT DISTINCT ile say
+  const targetKeys = Object.keys(ANNOTATION_TABLE_MAP);
   const byCategory = {};
-  const allCategories = new Set([...Object.keys(catToRunIds), ...Object.keys(catToSampleIds)]);
+  const allCategories = new Set(Object.keys(catToRunIds));
 
   for (const cat of allCategories) {
     byCategory[cat] = Object.fromEntries(targetKeys.map((k) => [k, 0]));
 
     for (const targetKey of targetKeys) {
-      const { table, idCol } = annotationTableMap[targetKey];
+      const { table, idCol } = ANNOTATION_TABLE_MAP[targetKey];
       if (!tableExists(table)) continue;
 
       const ids = catToRunIds[cat] || [];
@@ -144,12 +109,11 @@ export function getAnnotationFlow(req, res) {
         }
         byCategory[cat][targetKey] = distinctCount;
       } catch {
-        // tablo yoksa veya hata olursa 0 bırak
+        // ignore
       }
     }
   }
 
-  // Ham distinct sayıları dön (normalize edilmiyor) — frontend genişliği buna göre hesaplar
   const result = Object.entries(byCategory)
     .map(([key, values]) => {
       const total = Object.values(values).reduce((a, b) => a + b, 0);
@@ -162,17 +126,6 @@ export function getAnnotationFlow(req, res) {
 }
 
 // GET /api/stats/taxonomy
-// NOTE: RadialTaxonomy figürü (frontend) için Phylum->Class->Order->
-// Family hiyerarşisi (4 seviye — mock CLADO_NODES'un takip ettiği aynı
-// derinlik). Genus/Species BİLEREK dahil edilmedi: gerçek veride bunlar
-// çok sayıda benzersiz değer üretip ağacı okunmaz hale getirebilir; Family
-// seviyesi görsel için yeterli çözünürlük sağlıyor. Kaynak: SQLite
-// host_taxonomy tablosu (hotspot.tsv'den import edildi, importAllData.js).
-// Eksik/boş rütbe değerleri (Excel'de "-") "Unclassified" olarak
-// gruplanıyor ki ağaç kopmasın. Dönüş şekli, mock CLADO_NODES ile birebir
-// aynı ({ id, level, label, parentId, phylumId }) + ekstra "count" alanı
-// (frontend şu an kullanmıyor ama ileride örnek sayısı göstermek
-// istenirse hazır).
 export function getTaxonomy(req, res) {
   if (!tableExists("host_taxonomy")) {
     return res.status(503).json({
@@ -184,7 +137,7 @@ export function getTaxonomy(req, res) {
 
   const rows = db
     .prepare(
-      `SELECT phylum, class, order_name, family, COUNT(DISTINCT sample_id) as sampleCount
+      `SELECT phylum, class, order_name, family, COUNT(DISTINCT run_id) as sampleCount
        FROM host_taxonomy
        WHERE phylum IS NOT NULL
        GROUP BY phylum, class, order_name, family`
@@ -226,8 +179,6 @@ export function getTaxonomy(req, res) {
 }
 
 // GET /api/stats/map
-// Ülke başına örnek sayısı (gerçek) + o ülkedeki en baskın kategori (gerçek)
-// + yaklaşık merkez koordinat (mock centroid, countries.js'den).
 export function getMapData(req, res) {
   const data = readAll();
 
@@ -263,42 +214,49 @@ export function getMapData(req, res) {
   res.json(result);
 }
 
+// GET /api/stats/country/:country
 export function getCountryStats(req, res) {
   const { country } = req.params;
   const data = readAll();
-  const countryRows = data.filter(r => r.country === country);
-  
+  const countryRows = data.filter(
+    (r) => r.country === country || countryName(r.country) === country
+  );
+
   if (countryRows.length === 0) {
     return res.status(404).json({ error: "Country not found" });
   }
 
-  // Use run_id for everything
-  const runIds = countryRows.map(r => r.run_id).filter(Boolean);
-
+  const runIds = countryRows.map((r) => r.run_id).filter(Boolean);
   if (runIds.length === 0) {
     return res.json({ dominantAnnotations: {} });
   }
 
   const dominantAnnotations = {};
+  const CHUNK = 900;
+  const idsChunk = runIds.slice(0, CHUNK);
+  const placeholders = idsChunk.map(() => "?").join(",");
 
   // For host taxonomy (species)
   if (tableExists("host_taxonomy")) {
-    const placeholders = runIds.map(() => "?").join(",");
     try {
-      const rows = db.prepare(`SELECT species, COUNT(*) as cnt FROM host_taxonomy WHERE run_id IN (${placeholders}) AND species IS NOT NULL AND species != 'Unclassified' GROUP BY species ORDER BY cnt DESC LIMIT 1`).all(...runIds);
+      const rows = db
+        .prepare(
+          `SELECT species, COUNT(*) as cnt FROM host_taxonomy 
+           WHERE run_id IN (${placeholders}) AND species IS NOT NULL AND species != 'Unclassified' 
+           GROUP BY species ORDER BY cnt DESC LIMIT 1`
+        )
+        .all(...idsChunk);
       if (rows.length > 0) {
         dominantAnnotations["taxonomy"] = { label: rows[0].species, count: rows[0].cnt };
       }
-    } catch (e) {}
+    } catch {}
   }
 
-  const targetKeys = Object.keys(annotationTableMap);
+  const targetKeys = Object.keys(ANNOTATION_TABLE_MAP);
   for (const targetKey of targetKeys) {
-    const { table, idCol } = annotationTableMap[targetKey];
-    // idCol is always run_id now
+    const { table } = ANNOTATION_TABLE_MAP[targetKey];
     if (!tableExists(table)) continue;
 
-    // which label column to use?
     let labelCol = "class";
     if (table === "amr") labelCol = "class";
     if (table === "cazyme") labelCol = "family";
@@ -308,13 +266,18 @@ export function getCountryStats(req, res) {
     if (table === "acp") labelCol = "sequence";
     if (table === "pfam_ko") labelCol = "kegg_ko";
 
-    const placeholders = runIds.map(() => "?").join(",");
     try {
-      const rows = db.prepare(`SELECT ${labelCol} as label, COUNT(*) as cnt FROM ${table} WHERE run_id IN (${placeholders}) AND ${labelCol} IS NOT NULL GROUP BY ${labelCol} ORDER BY cnt DESC LIMIT 1`).all(...runIds);
+      const rows = db
+        .prepare(
+          `SELECT ${labelCol} as label, COUNT(*) as cnt FROM ${table} 
+           WHERE run_id IN (${placeholders}) AND ${labelCol} IS NOT NULL 
+           GROUP BY ${labelCol} ORDER BY cnt DESC LIMIT 1`
+        )
+        .all(...idsChunk);
       if (rows.length > 0) {
         dominantAnnotations[targetKey] = { label: rows[0].label, count: rows[0].cnt };
       }
-    } catch (e) {}
+    } catch {}
   }
 
   res.json({ dominantAnnotations });
