@@ -101,11 +101,11 @@ function fileExists(p) {
 
 // Bir tabloyu (varsa) silip yeniden oluşturan + insert eden genel akış.
 // columns: [{ dbName, sqlType }] — insert sırası bu diziyle birebir aynı.
-function loadTable(tableName, columns, rows, sampleIdColumn = "sample_id") {
+function loadTable(tableName, columns, rows, sampleIdColumn = "run_id") {
   db.exec(`DROP TABLE IF EXISTS ${tableName}`);
   const colDefs = columns.map((c) => `${c.dbName} ${c.sqlType}`).join(", ");
   db.exec(`CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY AUTOINCREMENT, ${colDefs})`);
-  db.exec(`CREATE INDEX idx_${tableName}_sample_id ON ${tableName}(${sampleIdColumn})`);
+  db.exec(`CREATE INDEX idx_${tableName}_run_id ON ${tableName}(${sampleIdColumn})`);
 
   const placeholders = columns.map(() => "?").join(", ");
   const insert = db.prepare(
@@ -127,7 +127,7 @@ function importAmr() {
   if (!fileExists(filePath)) { console.warn("[atlandı] combined_amr.tsv bulunamadı"); return; }
   const raw = readDelimited(filePath, "\t");
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "protein_id", sqlType: "TEXT" },
     { dbName: "type", sqlType: "TEXT" },
     { dbName: "subtype", sqlType: "TEXT" },
@@ -180,7 +180,7 @@ function importCgc() {
   if (!fileExists(filePath)) { console.warn("[atlandı] cgc.tsv / master_gene_table_cgc.tsv bulunamadı"); return; }
   const raw = readDelimited(filePath, "\t");
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "cgc_num", sqlType: "TEXT" },
     { dbName: "gene_type", sqlType: "TEXT" },
     { dbName: "contig_id", sqlType: "TEXT" },
@@ -230,7 +230,7 @@ function importCrisprCas() {
   if (!fileExists(filePath)) { console.warn("[atlandı] cctyper.tsv bulunamadı"); return; }
   const raw = readDelimited(filePath, "\t");
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "source", sqlType: "TEXT" },
     { dbName: "contig", sqlType: "TEXT" },
     { dbName: "type", sqlType: "TEXT" },
@@ -257,7 +257,7 @@ function importAmp() {
   if (!fileExists(filePath)) { console.warn("[atlandı] macrel_amp.tsv bulunamadı"); return; }
   const raw = readDelimited(filePath, ";");
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "access", sqlType: "TEXT" },
     { dbName: "sequence", sqlType: "TEXT" },
     { dbName: "amp_family", sqlType: "TEXT" },
@@ -291,7 +291,7 @@ async function importPfamKo() {
   if (files.length === 0) { console.warn("[atlandı] pfam_ko/ içinde .tsv dosyası yok"); return; }
 
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "protein_id", sqlType: "TEXT" },
     { dbName: "eggnog_ogs", sqlType: "TEXT" },
     { dbName: "cog_category", sqlType: "TEXT" },
@@ -383,7 +383,7 @@ function importHostTaxonomy() {
   const delimiter = detectDelimiter(filePath);
   const raw = readDelimited(filePath, delimiter);
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "contig", sqlType: "TEXT" },
     { dbName: "phylum", sqlType: "TEXT" },
     { dbName: "class", sqlType: "TEXT" },
@@ -413,7 +413,7 @@ function importAcp() {
   if (!fileExists(filePath)) { console.warn("[atlandı] acp.csv bulunamadı"); return; }
   const raw = readDelimited(filePath, ",");
   const columns = [
-    { dbName: "sample_id", sqlType: "TEXT" },
+    { dbName: "run_id", sqlType: "TEXT" },
     { dbName: "sequence", sqlType: "TEXT" },
     { dbName: "anticp2", sqlType: "REAL" },
     { dbName: "conacp", sqlType: "REAL" },

@@ -1086,8 +1086,16 @@ function WorldHeatMap({ onSeeSamples }) {
     return m;
   }, [mapPoints]);
 
-  const selectPoint = (p) => { setActive(p); setLocked(true); };
-  
+  const [countryDetails, setCountryDetails] = useState(null);
+
+  const selectPoint = (p) => { 
+    setActive(p); 
+    setLocked(true); 
+    setCountryDetails(null);
+    apiGet(`/api/stats/country/${encodeURIComponent(p.label)}`)
+      .then(res => setCountryDetails(res.dominantAnnotations))
+      .catch(console.error);
+  };
   const handleZoomIn = () => {
     if (position.zoom >= 8) return;
     setPosition(pos => ({ ...pos, zoom: pos.zoom * 1.5 }));
@@ -1216,11 +1224,30 @@ function WorldHeatMap({ onSeeSamples }) {
                       <span className="px-2 py-0.5 rounded-full text-xs text-white" style={{ backgroundColor: catColor(active.category) }}>{catLabel(active.category)}</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
+                  {locked && countryDetails && Object.keys(countryDetails).length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs mt-1" style={{ color: COLORS.inkSoft }}>
+                      {Object.entries(countryDetails).map(([key, info]) => {
+                        let displayName = key;
+                        if (key === 'taxonomy') displayName = 'Species';
+                        else if (ANNOTATIONS.find(a => a.key === key)) displayName = ANNOTATIONS.find(a => a.key === key).label;
+                        return (
+                          <div key={key} className="flex items-center gap-1 bg-white px-2 py-0.5 rounded border">
+                            <span className="font-semibold">{displayName}:</span>
+                            <span className="truncate max-w-[120px]" title={info.label}>{info.label}</span>
+                            <span className="opacity-70 text-[10px]">({info.count})</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {locked && !countryDetails && (
+                    <div className="text-xs mt-1 text-gray-400">Loading dominant traits...</div>
+                  )}
+                  <div className="flex items-center gap-3 mt-1">
                   <button onClick={() => onSeeSamples({ type: "country", value: active.label })} className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: COLORS.orange }}>
                     See {active.label} samples <ArrowRight size={12} />
                   </button>
-                  {locked && <button onClick={clearSelection} className="text-xs" style={{ color: COLORS.inkSoft }}>Clear</button>}
+                  {locked && <button onClick={() => { setActive(null); setLocked(false); }} className="text-xs" style={{ color: COLORS.inkSoft }}>Clear</button>}
                 </div>
               </>
             ) : (
@@ -1444,6 +1471,16 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
   const toggle = (setFn) => (val) => setFn((prev) => (prev.includes(val) ? prev.filter((x) => x !== val) : [...prev, val]));
   const toggleId = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
+  const pageIds = rows.map(r => r.id);
+  const allSelectedOnPage = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id));
+  const handleSelectAll = () => {
+    if (allSelectedOnPage) {
+      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
+    } else {
+      setSelectedIds(prev => [...new Set([...prev, ...pageIds])]);
+    }
+  };
+
   // Tüm filtreleri sıfırla
   const resetAllFilters = () => {
     setSelectedCats([]);
@@ -1510,6 +1547,15 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
               <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>Filters</span>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              {hasAnyFilter && (
+                <button
+                  onClick={resetAllFilters}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors flex items-center gap-1 hover:bg-gray-50"
+                  style={{ color: COLORS.orange, borderColor: COLORS.orange, fontFamily: FONT_BODY }}
+                >
+                  <RotateCcw size={12} /> Clear all filters
+                </button>
+              )}
               <FilterChip
                 label="Category"
                 options={filterOptions.categories.map((k) => ({ value: k, label: catLabel(k), swatch: catColor(k) }))}
@@ -1603,19 +1649,20 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
           <table className="w-full text-sm" style={{ fontFamily: FONT_BODY }}>
             <thead>
               <tr style={{ backgroundColor: COLORS.darkTeal }}>
-                <th className="w-8 py-2.5"></th>
+                <th className="w-8 py-2.5 px-3 text-center">
+                  <input type="checkbox" checked={allSelectedOnPage} onChange={handleSelectAll} style={{ accentColor: COLORS.orange }} />
+                </th>
                 <th className="text-left px-3 py-2.5 text-xs font-semibold text-white" style={{ fontFamily: FONT_MONO }}>ID</th>
                 <th className="text-left px-3 py-2.5 text-xs font-semibold text-white">Category</th>
                 <th className="text-left px-3 py-2.5 text-xs font-semibold text-white">Country</th>
                 <th className="text-left px-3 py-2.5 text-xs font-semibold text-white">Type</th>
-                <th className="text-left px-3 py-2.5 text-xs font-semibold text-white">Host</th>
                 <th className="text-left px-3 py-2.5 text-xs font-semibold text-white">Date</th>
                 <th className="text-right px-3 py-2.5 text-xs font-semibold text-white">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8}><LoadingBlock /></td></tr>
+                <tr><td colSpan={7}><LoadingBlock /></td></tr>
               )}
               {!loading && rows.map((r, i) => (
                 <tr key={r.id} style={{ backgroundColor: i % 2 ? COLORS.paperAlt : "#fff" }}>
@@ -1630,7 +1677,6 @@ function DataAccessPage({ onMockAction, onOpenSample, initialFilter }) {
                   </td>
                   <td className="px-3 py-2 cursor-pointer" style={{ color: COLORS.inkSoft }} onClick={() => onOpenSample(r.id)}>{r.country}</td>
                   <td className="px-3 py-2 cursor-pointer" style={{ color: COLORS.inkSoft }} onClick={() => onOpenSample(r.id)}>{r.type}</td>
-                  <td className="px-3 py-2 italic cursor-pointer" style={{ color: COLORS.inkSoft }} onClick={() => onOpenSample(r.id)}>{r.host}</td>
                   <td className="px-3 py-2 cursor-pointer" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }} onClick={() => onOpenSample(r.id)}>{r.year}</td>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1.5">
@@ -1694,6 +1740,7 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
   // Zenodo raw-data links (byCategory / byCountry) — fetched independently
   // of the sample record so the "Download Raw Files" button can resolve as
   // soon as both the record's category and this map are ready.
+  const [exporting, setExporting] = useState(false);
   const [rawLinks, setRawLinks] = useState(null);
 
   useEffect(() => {
@@ -1788,7 +1835,7 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
                   {annotationsToShow.map((a) => (
                     <div key={a.key}>
                       <div className="text-sm" style={{ fontWeight: 700, color: COLORS.ink, fontFamily: FONT_BODY }}>
-                        {ANNOTATION_LABELS[a.key] || a.key} <span style={{ fontWeight: 400, color: COLORS.inkSoft }}>({a.count} hit{a.count === 1 ? "" : "s"} — gerçek sayı)</span>
+                        {ANNOTATION_LABELS[a.key] || a.key} <em style={{ fontWeight: 400, color: COLORS.inkSoft, marginLeft: 4 }}>{a.count} hit{a.count !== 1 && "s"}</em>
                       </div>
                       <div className="mt-1 space-y-0.5">
                         {a.hits.length === 0 ? (
@@ -1845,12 +1892,28 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
                 ))}
               </div>
               <button
-                onClick={() => onMockAction(`${selectedDownloads.length} file(s) will be downloaded for ${record.id}.`)}
-                disabled={selectedDownloads.length === 0}
+                onClick={async () => {
+                  setExporting(true);
+                  try {
+                    await apiPostBlobDownload(
+                      "/api/downloads/export",
+                      {
+                        sampleIds: [record.id],
+                        include: { metadata: true, annotations: selectedDownloads },
+                      },
+                      "gfpr-export.zip"
+                    );
+                  } catch (e) {
+                    onMockAction(`İndirme başarısız oldu: ${e.message}`);
+                  } finally {
+                    setExporting(false);
+                  }
+                }}
+                disabled={selectedDownloads.length === 0 || exporting}
                 className="w-full flex items-center justify-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-lg text-white"
-                style={{ backgroundColor: selectedDownloads.length ? COLORS.orange : "#c9c9c9" }}
+                style={{ backgroundColor: (selectedDownloads.length && !exporting) ? COLORS.orange : "#c9c9c9" }}
               >
-                <Download size={14} /> Download Selected ({selectedDownloads.length})
+                <Download size={14} /> {exporting ? "Preparing..." : `Download Selected (${selectedDownloads.length})`}
               </button>
             </div>
           </div>

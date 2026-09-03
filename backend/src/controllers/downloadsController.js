@@ -27,9 +27,9 @@ function chunk(arr, size) {
 }
 
 // Bir anotasyon tablosundan, verilen ID listesine ait TÜM satırları çeker.
-// idColumn: tablonun filtreleme sütunu (çoğu tablo için "sample_id",
-// cazyme tablosu için "run_id"). Tablo hiç import edilmemişse null döner.
-function getAnnotationRows(tableName, sampleIds, idColumn = "sample_id") {
+// idColumn: tablonun filtreleme sütunu (çoğu tablo için "run_id").
+// Tablo hiç import edilmemişse null döner.
+function getAnnotationRows(tableName, sampleIds, idColumn = "run_id") {
   if (!tableExists(tableName)) return null;
   let allRows = [];
   for (const idsChunk of chunk(sampleIds, CHUNK_SIZE)) {
@@ -118,9 +118,7 @@ export async function exportDownload(req, res) {
     : allMetadata.map((r) => r.run_id).filter(Boolean);
 
   for (const key of wantedAnnotations) {
-    // cazyme run_id, diğerleri sample_id sütunu ile filtrelenir.
-    const isCazyme = key === "cazyme";
-    const rows = getAnnotationRows(key, isCazyme ? effectiveRunIds : effectiveIds, isCazyme ? "run_id" : "sample_id");
+    const rows = getAnnotationRows(key, effectiveRunIds, "run_id");
     if (rows === null) {
       archive.append(
         `${key} tablosu henüz import edilmemiş. Backend'de ` +

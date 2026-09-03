@@ -105,15 +105,14 @@ export function getAnnotationFlow(req, res) {
     }
   }
 
-  // Her annotation tipi için hangi tablo, hangi id sütunu kullanılacak
   const annotationTableMap = {
-    amr:       { table: "amr",       idCol: "sample_id" },
-    cazyme:    { table: "cazyme",    idCol: "run_id"    }, // cazyme run_id ile indexlendi
-    cgc:       { table: "cgc",       idCol: "sample_id" },
-    crispr:    { table: "crispr_cas",idCol: "sample_id" },
-    amp:       { table: "amp",       idCol: "sample_id" },
-    acp:       { table: "acp",       idCol: "sample_id" },
-    pfam_kegg: { table: "pfam_ko",   idCol: "sample_id" },
+    amr:       { table: "amr",       idCol: "run_id" },
+    cazyme:    { table: "cazyme",    idCol: "run_id" },
+    cgc:       { table: "cgc",       idCol: "run_id" },
+    crispr:    { table: "crispr_cas",idCol: "run_id" },
+    amp:       { table: "amp",       idCol: "run_id" },
+    acp:       { table: "acp",       idCol: "run_id" },
+    pfam_kegg: { table: "pfam_ko",   idCol: "run_id" },
   };
 
   const targetKeys = Object.keys(annotationTableMap);
@@ -129,8 +128,7 @@ export function getAnnotationFlow(req, res) {
       const { table, idCol } = annotationTableMap[targetKey];
       if (!tableExists(table)) continue;
 
-      // cazyme için run_id listesi, diğerleri için sample_id listesi
-      const ids = idCol === "run_id" ? (catToRunIds[cat] || []) : (catToSampleIds[cat] || []);
+      const ids = catToRunIds[cat] || [];
       if (ids.length === 0) continue;
 
       try {
@@ -263,4 +261,61 @@ export function getMapData(req, res) {
   });
 
   res.json(result);
+}
+
+export function getCountryStats(req, res) {
+  const { country } = req.params;
+  const data = readAll();
+  const countryRows = data.filter(r => r.country === country);
+  
+  if (countryRows.length === 0) {
+    return res.status(404).json({ error: "Country not found" });
+  }
+
+  // Use run_id for everything
+  const runIds = countryRows.map(r => r.run_id).filter(Boolean);
+
+  if (runIds.length === 0) {
+    return res.json({ dominantAnnotations: {} });
+  }
+
+  const dominantAnnotations = {};
+
+  // For host taxonomy (species)
+  if (tableExists("host_taxonomy")) {
+    const placeholders = runIds.map(() => "?").join(",");
+    try {
+      const rows = db.prepare(`SELECT species, COUNT(*) as cnt FROM host_taxonomy WHERE run_id IN (${placeholders}) AND species IS NOT NULL AND species != 'Unclassified' GROUP BY species ORDER BY cnt DESC LIMIT 1`).all(...runIds);
+      if (rows.length > 0) {
+        dominantAnnotations["taxonomy"] = { label: rows[0].species, count: rows[0].cnt };
+      }
+    } catch (e) {}
+  }
+
+  const targetKeys = Object.keys(annotationTableMap);
+  for (const targetKey of targetKeys) {
+    const { table, idCol } = annotationTableMap[targetKey];
+    // idCol is always run_id now
+    if (!tableExists(table)) continue;
+
+    // which label column to use?
+    let labelCol = "class";
+    if (table === "amr") labelCol = "class";
+    if (table === "cazyme") labelCol = "family";
+    if (table === "cgc") labelCol = "gene_annotation";
+    if (table === "crispr_cas") labelCol = "type";
+    if (table === "amp") labelCol = "amp_family";
+    if (table === "acp") labelCol = "sequence";
+    if (table === "pfam_ko") labelCol = "kegg_ko";
+
+    const placeholders = runIds.map(() => "?").join(",");
+    try {
+      const rows = db.prepare(`SELECT ${labelCol} as label, COUNT(*) as cnt FROM ${table} WHERE run_id IN (${placeholders}) AND ${labelCol} IS NOT NULL GROUP BY ${labelCol} ORDER BY cnt DESC LIMIT 1`).all(...runIds);
+      if (rows.length > 0) {
+        dominantAnnotations[targetKey] = { label: rows[0].label, count: rows[0].cnt };
+      }
+    } catch (e) {}
+  }
+
+  res.json({ dominantAnnotations });
 }
