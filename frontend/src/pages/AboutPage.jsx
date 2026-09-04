@@ -120,7 +120,10 @@ export function AboutPage() {
             />
             <WorldMap onSelectCountry={(country) => goToSamples({ country })} />
             <RadialTaxonomy />
-            <RibbonChord onSelectCategory={(category) => goToSamples({ category })} />
+            <RibbonChord
+              onSelectCategory={(category) => goToSamples({ category })}
+              onSelectAnnotation={(annotation) => goToSamples({ annotation })}
+            />
           </div>
         </div>
       </section>

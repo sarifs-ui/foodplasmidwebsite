@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { clamp } from "../theme/tokens.js";
 
+/** Pointer travel, in CSS pixels, before a press counts as a pan and not a click. */
+const DRAG_THRESHOLD = 4;
+
 /**
  * Pan and zoom over an SVG viewBox.
  *
@@ -15,6 +18,11 @@ import { clamp } from "../theme/tokens.js";
  * it happens when the element actually mounts — which for a figure is after its
  * data has loaded, not on first render.
  *
+ * Dragging starts lazily, once the pointer has actually moved DRAG_THRESHOLD
+ * pixels. Capturing the pointer on pointerdown — as this did — retargets the
+ * following click to the capturing element, so every click on a shape *inside*
+ * the figure was swallowed: the chord arcs never registered a selection.
+ *
  * @param width   viewBox width at zoom 1
  * @param height  viewBox height at zoom 1
  */
@@ -23,6 +31,9 @@ export function usePanZoom({ width, height, minZoom = 1, maxZoom = 8 } = {}) {
   const [dragging, setDragging] = useState(false);
   const [node, setNode] = useState(null);
   const dragState = useRef(null);
+  // Set when a gesture turned out to be a pan, so the click it ends with does
+  // not also count as a click on whatever shape sat under the cursor.
+  const suppressClick = useRef(false);
 
   const containerRef = useCallback((element) => setNode(element), []);
 
@@ -87,6 +98,9 @@ export function usePanZoom({ width, height, minZoom = 1, maxZoom = 8 } = {}) {
   const onPointerDown = useCallback((event) => {
     // Left button only, so context menus and middle-click paste still work.
     if (event.button !== 0) return;
+    // Every click is preceded by a pointerdown, so clearing the flag here means
+    // a pan that ended without a click cannot poison the next real one.
+    suppressClick.current = false;
     const rect = event.currentTarget.getBoundingClientRect();
     dragState.current = {
       pointerId: event.pointerId,
@@ -95,9 +109,8 @@ export function usePanZoom({ width, height, minZoom = 1, maxZoom = 8 } = {}) {
       rectWidth: rect.width,
       rectHeight: rect.height,
       origin: null,
+      moved: false,
     };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    setDragging(true);
   }, []);
 
   const onPointerMove = useCallback(
@@ -106,6 +119,15 @@ export function usePanZoom({ width, height, minZoom = 1, maxZoom = 8 } = {}) {
       if (!drag || drag.pointerId !== event.pointerId) return;
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
+
+      if (!drag.moved) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        drag.moved = true;
+        // Only now is this unmistakably a drag, so capturing the pointer (and
+        // with it the click) costs nothing.
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        setDragging(true);
+      }
 
       setView((prev) => {
         // The pan origin is captured on the first move, when `prev` is known.
@@ -123,9 +145,22 @@ export function usePanZoom({ width, height, minZoom = 1, maxZoom = 8 } = {}) {
   const endDrag = useCallback((event) => {
     const drag = dragState.current;
     if (!drag) return;
-    event?.currentTarget?.releasePointerCapture?.(drag.pointerId);
     dragState.current = null;
+    if (!drag.moved) return;
+    event?.currentTarget?.releasePointerCapture?.(drag.pointerId);
+    suppressClick.current = true;
     setDragging(false);
+  }, []);
+
+  /**
+   * Runs in the capture phase, so the click a pan ends with never reaches the
+   * shapes underneath.
+   */
+  const onClickCapture = useCallback((event) => {
+    if (!suppressClick.current) return;
+    suppressClick.current = false;
+    event.stopPropagation();
+    event.preventDefault();
   }, []);
 
   const viewBox = `${view.x} ${view.y} ${width / view.zoom} ${height / view.zoom}`;
@@ -143,6 +178,7 @@ export function usePanZoom({ width, height, minZoom = 1, maxZoom = 8 } = {}) {
       onPointerMove,
       onPointerUp: endDrag,
       onPointerCancel: endDrag,
+      onClickCapture,
       style: { cursor: dragging ? "grabbing" : "grab", touchAction: "none" },
     },
   };

@@ -6,7 +6,10 @@ import { apiPostDownload } from "../api/client.js";
 import { useApi, useDebounced } from "../api/useApi.js";
 import { FilterChip } from "../components/ui/FilterChip.jsx";
 import { ErrorBlock, LoadingBlock, SectionTitle } from "../components/ui/index.jsx";
-import { EXPORT_ANNOTATION_KEYS } from "../domain/annotations.js";
+import {
+  EXPORT_ANNOTATION_KEYS,
+  annotationLabel,
+} from "../domain/annotations.js";
 import { categoryColor, categoryLabel } from "../domain/categories.js";
 import { formatCount } from "../lib/format.js";
 import { COLORS, FONT_BODY, FONT_MONO } from "../theme/tokens.js";
@@ -50,7 +53,10 @@ export function DataAccessPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedIds, setSelectedIds] = useState([]);
-  const [exporting, setExporting] = useState(false);
+  // Which export is in flight, so only the button that was pressed shows the
+  // progress readout — `null` when none is.
+  const [exportingKey, setExportingKey] = useState(null);
+  const [exportPercent, setExportPercent] = useState(0);
   const [exportError, setExportError] = useState(null);
 
   // The search box is local state so typing stays responsive; the URL and the
@@ -154,6 +160,13 @@ export function DataAccessPage() {
   const hasActiveQuery =
     activeFilterCount > 0 || Boolean(searchParams.get("fermented")) || Boolean(searchInput);
 
+  // Set by the chord diagram's "Open <table> records" link. It focuses the
+  // export controls on one annotation table rather than filtering the rows,
+  // which is what the catalogue is indexed by.
+  const focusedAnnotation = EXPORT_ANNOTATION_KEYS.includes(searchParams.get("annotation"))
+    ? searchParams.get("annotation")
+    : null;
+
   const results = data?.results ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -161,9 +174,23 @@ export function DataAccessPage() {
   const allOnPageSelected =
     results.length > 0 && results.every((r) => selectedIds.includes(r.id));
 
-  const runExport = async (annotations) => {
-    setExporting(true);
+  const runExport = async (annotations, key) => {
+    setExportingKey(key);
+    setExportPercent(0);
     setExportError(null);
+    // Chunks arrive every few dozen kB; re-rendering the table that often
+    // would cost more than the download does, so only whole percents are
+    // pushed into state.
+    let shown = 0;
+    const report = (received, total) => {
+      if (!total) return;
+      // The total is an estimate, so the last percent is held back until the
+      // stream actually ends rather than sitting at 100% or overshooting it.
+      const percent = Math.min(99, Math.floor((received / total) * 100));
+      if (percent <= shown) return;
+      shown = percent;
+      setExportPercent(percent);
+    };
     try {
       await apiPostDownload(
         "/api/downloads/export",
@@ -171,14 +198,20 @@ export function DataAccessPage() {
           runIds: selectedIds,
           include: { metadata: true, annotations },
         },
-        "gfpr-export.zip"
+        "gfpr-export.zip",
+        { onProgress: report }
       );
     } catch (err) {
       setExportError(err.message);
     } finally {
-      setExporting(false);
+      setExportingKey(null);
     }
   };
+
+  const exporting = exportingKey !== null;
+  /** Label for a button while its own export runs. */
+  const progressLabel = (key) =>
+    exportingKey === key ? (exportPercent > 0 ? `${exportPercent}%` : "Preparing…") : null;
 
   const goToPage = (nextPage) => {
     const next = new URLSearchParams(searchParams);
@@ -306,30 +339,67 @@ export function DataAccessPage() {
             )}
             <button
               type="button"
-              onClick={() => runExport([])}
+              onClick={() => runExport([], "metadata")}
               disabled={exporting}
               className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-60"
               style={{ backgroundColor: COLORS.lightTeal, color: COLORS.darkTeal }}
             >
               <Download size={13} aria-hidden="true" />
-              {exporting ? "Preparing…" : "Metadata (CSV)"}
+              {progressLabel("metadata") ?? "Metadata (CSV)"}
             </button>
             <button
               type="button"
-              onClick={() => runExport(EXPORT_ANNOTATION_KEYS)}
+              onClick={() => runExport(EXPORT_ANNOTATION_KEYS, "annotations")}
               disabled={exporting}
               className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg text-white disabled:opacity-60"
               style={{ backgroundColor: COLORS.orange }}
             >
               <Download size={13} aria-hidden="true" />
-              {exporting ? "Preparing…" : "Metadata + annotations"}
+              {progressLabel("annotations") ?? "Metadata + annotations"}
             </button>
           </div>
         </div>
 
+        {focusedAnnotation && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 mb-3 px-4 py-3 rounded-xl"
+            style={{ backgroundColor: COLORS.lightTeal, border: `1px solid ${COLORS.line}` }}
+          >
+            <span className="text-xs" style={{ color: COLORS.darkTeal }}>
+              Focused on{" "}
+              <strong>{annotationLabel(focusedAnnotation)}</strong> — export it on its own,
+              with the metadata for the same samples.
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => runExport([focusedAnnotation], "focused")}
+                disabled={exporting}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg text-white disabled:opacity-60"
+                style={{ backgroundColor: COLORS.darkTeal }}
+              >
+                <Download size={13} aria-hidden="true" />
+                {progressLabel("focused") ??
+                  `Metadata + ${annotationLabel(focusedAnnotation)}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => updateParams((next) => next.delete("annotation"))}
+                aria-label="Clear the focused annotation"
+                className="text-xs"
+                style={{ color: COLORS.inkSoft }}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {selectedIds.length === 0 && (
           <p className="text-xs mb-3" style={{ color: COLORS.inkSoft }}>
-            Nothing selected — an export will include the entire catalogue.
+            Nothing selected — an export will include the entire catalogue. With every
+            annotation table that is about a 55 MB archive (~340 MB of CSV), and takes
+            some seconds to build.
           </p>
         )}
         {exportError && <ErrorBlock message={exportError} />}

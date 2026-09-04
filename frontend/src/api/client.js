@@ -33,6 +33,30 @@ function buildUrl(path, params) {
   return url.toString();
 }
 
+/**
+ * Collect a streamed response, reporting progress as it arrives.
+ *
+ * `onProgress(received, total)` — `total` is the server's estimate from
+ * X-Export-Estimated-Bytes, or 0 when it did not send one.
+ */
+async function readWithProgress(res, onProgress) {
+  const total =
+    Number(res.headers.get("X-Export-Estimated-Bytes")) ||
+    Number(res.headers.get("Content-Length")) ||
+    0;
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onProgress(received, total);
+  }
+  return new Blob(chunks, { type: res.headers.get("Content-Type") || "application/octet-stream" });
+}
+
 async function readError(res, path) {
   let detail = "";
   try {
@@ -63,8 +87,12 @@ export async function apiPost(path, body) {
 /**
  * POST that streams back a file rather than JSON — used by the export
  * endpoint. Triggers a browser download through a temporary anchor.
+ *
+ * `onProgress(received, total)` reports the bytes received against the size
+ * the server estimated for the archive — it is built while it is sent, so a
+ * real Content-Length does not exist.
  */
-export async function apiPostDownload(path, body, filename = "download.zip") {
+export async function apiPostDownload(path, body, filename = "download.zip", { onProgress } = {}) {
   const res = await fetch(API_BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -72,7 +100,10 @@ export async function apiPostDownload(path, body, filename = "download.zip") {
   });
   if (!res.ok) throw await readError(res, path);
 
-  const blob = await res.blob();
+  const blob =
+    onProgress && res.body?.getReader
+      ? await readWithProgress(res, onProgress)
+      : await res.blob();
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

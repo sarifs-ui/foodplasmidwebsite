@@ -1,12 +1,45 @@
 import archiver from "archiver";
 
 import {
+  MAX_ROWS_PER_TABLE,
   MAX_RUN_IDS,
-  allRunIds,
   buildMetadataCsv,
+  countAnnotationRows,
+  countSamples,
+  estimateArchiveBytes,
   isExportableKey,
   streamAnnotationCsv,
 } from "../services/exportService.js";
+
+/**
+ * A plain-text inventory of what the archive holds.
+ *
+ * Written first, so anyone opening the zip can see the row count behind every
+ * file — and, if a table ever hits the row ceiling, that it did.
+ */
+function buildManifest({ runIds, wantMetadata, tables, sampleCount }) {
+  const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
+  const lines = [
+    "GFPR export",
+    `Generated: ${new Date().toISOString()}`,
+    `Samples: ${sampleCount}${runIds ? " (selected)" : " (entire catalogue)"}`,
+    "",
+    "Files:",
+  ];
+  if (wantMetadata) lines.push(`  metadata.csv — ${rowCount(sampleCount)}`);
+  for (const { key, rows } of tables) {
+    if (rows === null) {
+      lines.push(`  annotations/${key}.csv — NOT AVAILABLE in this deployment`);
+    } else if (rows > MAX_ROWS_PER_TABLE) {
+      lines.push(
+        `  annotations/${key}.csv — ${MAX_ROWS_PER_TABLE} of ${rows} rows (TRUNCATED at the per-table ceiling)`
+      );
+    } else {
+      lines.push(`  annotations/${key}.csv — ${rowCount(rows)}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
 
 /**
  * POST /api/downloads/export
@@ -42,12 +75,33 @@ export async function exportArchive(req, res) {
     });
   }
 
-  const runIds = requestedIds.length > 0 ? requestedIds : allRunIds();
+  // null means "the whole catalogue": the query layer then reads each table
+  // sequentially instead of looking up every run id one by one, which is the
+  // difference between three seconds and over a minute on the largest table.
+  const runIds = requestedIds.length > 0 ? requestedIds : null;
+  const sampleCount = countSamples(runIds);
+
+  // Counted once, then reused by the manifest and the size estimate.
+  const tables = requestedAnnotations.map((key) => ({
+    key,
+    rows: countAnnotationRows(key, runIds),
+  }));
+  const metadataCsv = wantMetadata ? buildMetadataCsv(runIds) : null;
 
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", 'attachment; filename="gfpr-export.zip"');
+  // The archive is compressed as it is sent, so there is no Content-Length to
+  // give. This estimate is what lets the UI show a percentage; it is explicitly
+  // approximate, and the client clamps it.
+  res.setHeader(
+    "X-Export-Estimated-Bytes",
+    String(estimateArchiveBytes({ metadataCsv, tables, runIds }))
+  );
+  res.setHeader("Access-Control-Expose-Headers", "X-Export-Estimated-Bytes");
 
-  const archive = archiver("zip", { zlib: { level: 9 } });
+  // Level 6 is zlib's default. Level 9 costs several times the CPU on a
+  // multi-hundred-MB export for about a percent of size.
+  const archive = archiver("zip", { zlib: { level: 6 } });
   archive.on("error", (err) => {
     // Headers are already sent by this point; closing the stream is all that is left.
     console.error("[export] archive error:", err);
@@ -55,8 +109,12 @@ export async function exportArchive(req, res) {
   });
   archive.pipe(res);
 
-  if (wantMetadata) {
-    archive.append(buildMetadataCsv(runIds), { name: "metadata.csv" });
+  archive.append(buildManifest({ runIds, wantMetadata, tables, sampleCount }), {
+    name: "MANIFEST.txt",
+  });
+
+  if (metadataCsv !== null) {
+    archive.append(metadataCsv, { name: "metadata.csv" });
   }
 
   for (const key of requestedAnnotations) {

@@ -61,3 +61,20 @@ const FALLBACK_COLORS = [
 export function flowClassColor(key, index = 0) {
   return FLOW_COLORS[key] || FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
+
+/**
+ * Chord feature class -> annotation table, where one exists.
+ *
+ * Heat resistance, heavy-metal resistance and virulence are only present in
+ * the published chord matrix: there is no gene-level table behind them, so a
+ * link to their records would go nowhere and the figure says so instead.
+ */
+const FLOW_CLASS_ANNOTATION = {
+  cazyme: "cazyme",
+  amr: "amr",
+  crispr_cas: "crispr_cas",
+};
+
+export function flowClassAnnotation(key) {
+  return FLOW_CLASS_ANNOTATION[key] || null;
+}

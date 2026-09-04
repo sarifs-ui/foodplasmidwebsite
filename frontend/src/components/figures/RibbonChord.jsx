@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { ArrowRight, RotateCcw, Waves, ZoomIn, ZoomOut } from "lucide-react";
 
 import { useApi } from "../../api/useApi.js";
-import { flowClassColor } from "../../domain/annotations.js";
+import { annotationLabel, flowClassAnnotation, flowClassColor } from "../../domain/annotations.js";
 import { categoryColor, categoryLabel } from "../../domain/categories.js";
 import { arcPath, buildChordLayout, polar, ribbonPath } from "../../lib/geometry.js";
 import { usePanZoom } from "../../lib/usePanZoom.js";
@@ -48,7 +48,7 @@ function labelPlacement(rawAngle) {
  * resistance, virulence) have no per-gene source file, so recomputing would
  * silently drop half the figure.
  */
-export function RibbonChord({ onSelectCategory }) {
+export function RibbonChord({ onSelectCategory, onSelectAnnotation }) {
   const { data, error, loading } = useApi("/api/stats/annotation-flow");
   const [hoveredCategory, setHoveredCategory] = useState(null);
   const [hoveredClass, setHoveredClass] = useState(null);
@@ -94,6 +94,14 @@ export function RibbonChord({ onSelectCategory }) {
         const { sourceBlocks, targetBlocks, ribbons } = layout;
         const activeCategory = hoveredCategory || (selected?.kind === "category" ? selected.key : null);
         const activeClass = hoveredClass || (selected?.kind === "class" ? selected.key : null);
+        // The footer follows the click, not the cursor: driven by hover it
+        // disappeared the moment you moved towards the link it offered.
+        const selectionLabel =
+          selected?.kind === "category"
+            ? categoryLabel(selected.key)
+            : targetBlocks.find((t) => t.key === selected?.key)?.label || selected?.key;
+        const annotationKey =
+          selected?.kind === "class" ? flowClassAnnotation(selected.key) : null;
 
         return (
           <>
@@ -173,87 +181,55 @@ export function RibbonChord({ onSelectCategory }) {
                 );
               })}
 
-              {sourceBlocks.map((block) => {
-                const isActive = activeCategory === block.key;
-                const place = labelPlacement((block.a0 + block.a1) / 2);
-                return (
-                  <g key={block.key}>
-                    <path
-                      d={arcPath(CX, CY, R, OUTER_R, block.a0, block.a1)}
-                      fill={block.color}
-                      opacity={activeCategory && !isActive ? 0.3 : 1}
-                      style={{ cursor: "pointer", transition: "opacity .25s" }}
-                      onMouseEnter={() => setHoveredCategory(block.key)}
-                      onMouseLeave={() => setHoveredCategory(null)}
-                      onClick={() =>
-                        setSelected(
-                          selected?.kind === "category" && selected.key === block.key
-                            ? null
-                            : { kind: "category", key: block.key }
-                        )
-                      }
-                    >
-                      <title>{block.label}</title>
-                    </path>
-                    <text
-                      x={place.x}
-                      y={place.y}
-                      transform={place.transform}
-                      textAnchor={place.anchor}
-                      dominantBaseline="middle"
-                      style={{
-                        fontSize: 10,
-                        fill: isActive ? COLORS.ink : COLORS.inkSoft,
-                        fontWeight: isActive ? 700 : 400,
-                        pointerEvents: "none",
-                      }}
-                    >
-                      {block.label}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {targetBlocks.map((block) => {
-                const isActive = activeClass === block.key;
-                const place = labelPlacement((block.a0 + block.a1) / 2);
-                return (
-                  <g key={block.key}>
-                    <path
-                      d={arcPath(CX, CY, R, OUTER_R, block.a0, block.a1)}
-                      fill={block.color}
-                      opacity={activeClass && !isActive ? 0.3 : 1}
-                      style={{ cursor: "pointer", transition: "opacity .25s" }}
-                      onMouseEnter={() => setHoveredClass(block.key)}
-                      onMouseLeave={() => setHoveredClass(null)}
-                      onClick={() =>
-                        setSelected(
-                          selected?.kind === "class" && selected.key === block.key
-                            ? null
-                            : { kind: "class", key: block.key }
-                        )
-                      }
-                    >
-                      <title>{block.label}</title>
-                    </path>
-                    <text
-                      x={place.x}
-                      y={place.y}
-                      transform={place.transform}
-                      textAnchor={place.anchor}
-                      dominantBaseline="middle"
-                      style={{
-                        fontSize: 10,
-                        fill: isActive ? COLORS.ink : COLORS.inkSoft,
-                        fontWeight: isActive ? 700 : 400,
-                        pointerEvents: "none",
-                      }}
-                    >
-                      {block.label}
-                    </text>
-                  </g>
-                );
-              })}
+              {[
+                { kind: "category", blocks: sourceBlocks, active: activeCategory, setHovered: setHoveredCategory },
+                { kind: "class", blocks: targetBlocks, active: activeClass, setHovered: setHoveredClass },
+              ].map(({ kind, blocks, active, setHovered }) =>
+                blocks.map((block) => {
+                  const isActive = active === block.key;
+                  const isSelected = selected?.kind === kind && selected.key === block.key;
+                  const place = labelPlacement((block.a0 + block.a1) / 2);
+                  // The label is as much a target as the arc: several arcs are
+                  // only a couple of pixels wide, and the label is what a
+                  // reader is actually pointing at.
+                  const handlers = {
+                    onMouseEnter: () => setHovered(block.key),
+                    onMouseLeave: () => setHovered(null),
+                    onClick: () => setSelected(isSelected ? null : { kind, key: block.key }),
+                    style: { cursor: "pointer" },
+                  };
+                  return (
+                    <g key={`${kind}:${block.key}`}>
+                      <path
+                        d={arcPath(CX, CY, R, OUTER_R, block.a0, block.a1)}
+                        fill={block.color}
+                        opacity={active && !isActive ? 0.3 : 1}
+                        {...handlers}
+                        style={{ ...handlers.style, transition: "opacity .25s" }}
+                      >
+                        <title>{block.label}</title>
+                      </path>
+                      <text
+                        x={place.x}
+                        y={place.y}
+                        transform={place.transform}
+                        textAnchor={place.anchor}
+                        dominantBaseline="middle"
+                        {...handlers}
+                        style={{
+                          ...handlers.style,
+                          fontSize: 10,
+                          fill: isActive ? COLORS.ink : COLORS.inkSoft,
+                          fontWeight: isActive || isSelected ? 700 : 400,
+                          textDecoration: isSelected ? "underline" : "none",
+                        }}
+                      >
+                        {block.label}
+                      </text>
+                    </g>
+                  );
+                })
+              )}
               </g>
             </svg>
             </div>
@@ -262,24 +238,41 @@ export function RibbonChord({ onSelectCategory }) {
               className="mt-2 pt-3 flex flex-wrap items-center justify-between gap-3"
               style={{ borderTop: `1px solid ${COLORS.line}` }}
             >
-              {activeCategory ? (
+              {selected ? (
                 <>
                   <span className="text-xs" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>
-                    {categoryLabel(activeCategory)}
+                    Selected:{" "}
+                    <strong style={{ color: COLORS.darkTeal }}>{selectionLabel}</strong>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => onSelectCategory?.(activeCategory)}
-                    className="inline-flex items-center gap-1 text-xs font-semibold"
-                    style={{ color: COLORS.orange }}
-                  >
-                    See {categoryLabel(activeCategory)} samples <ArrowRight size={12} />
-                  </button>
+                  {selected.kind === "category" ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelectCategory?.(selected.key)}
+                      className="inline-flex items-center gap-1 text-xs font-semibold"
+                      style={{ color: COLORS.orange }}
+                    >
+                      See {selectionLabel} samples <ArrowRight size={12} />
+                    </button>
+                  ) : annotationKey ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelectAnnotation?.(annotationKey)}
+                      className="inline-flex items-center gap-1 text-xs font-semibold"
+                      style={{ color: COLORS.orange }}
+                    >
+                      Open {annotationLabel(annotationKey)} records <ArrowRight size={12} />
+                    </button>
+                  ) : (
+                    <span className="text-xs" style={{ color: COLORS.inkSoft }}>
+                      Aggregate class only — no gene-level table in this release.
+                    </span>
+                  )}
                 </>
               ) : (
                 <span className="text-xs" style={{ color: COLORS.inkSoft }}>
-                  Hover an arc to isolate its ribbons; click to keep the selection. Scroll
-                  to zoom, drag to pan.
+                  Hover an arc to isolate its ribbons; click a category or feature class to
+                  keep it selected and get a link to its records. Scroll to zoom, drag to
+                  pan.
                 </span>
               )}
             </div>
