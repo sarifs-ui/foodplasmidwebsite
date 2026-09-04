@@ -4,19 +4,23 @@ import { useNavigate } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
 import { COLORS, FONT_BODY, FONT_DISPLAY } from "../theme/tokens.js";
 
+const PLASMID_TEM =
+  "/images/bacterial-plasmids-coloured-transmission-electron-micrograph-tem-of-two-circles-or-plasmids-of-dna-from-bacteria-a-plasmid-is-a-length-of-dna-t-2ADG4FH.jpg";
+
 /**
- * Card images are drawn from the assets that actually ship in public/images.
- * The previous set pointed at four files that were never added, so every card
- * rendered a broken image.
+ * Each card's image previews what the page actually holds: a micrograph of
+ * plasmids for the overview, the metadata table for the browser, and FASTA
+ * records for the download archives. The two schematic images are SVGs drawn
+ * from real column names and record shapes rather than stock photography.
  */
 const HOME_CARDS = [
   {
     to: "/about",
     title: "About GFPR",
-    teaser: "What is GFPR?",
+    teaser: "What is the GFPR? Explore the GFPR",
     description:
       "See what GFPR is, what it includes, and why it matters. Click to explore.",
-    image: "/images/plasmid.jpg",
+    image: PLASMID_TEM,
   },
   {
     to: "/samples",
@@ -24,7 +28,7 @@ const HOME_CARDS = [
     teaser: "Filter and browse the database metadata",
     description:
       "Filter by category, type, subtype, fermentation status, country and year. Download metadata as CSV, or go straight to the raw output for the records you select. Click to explore.",
-    image: "/images/mini_magick20220828-1-ymuhvf.png",
+    image: "/images/card-metadata-table.svg",
   },
   {
     to: "/downloads",
@@ -32,8 +36,7 @@ const HOME_CARDS = [
     teaser: "Direct links to plasmid contig archives",
     description:
       "Browse archives of plasmid contigs grouped by food category or country of origin. Pick a group and open its archive directly. Click to explore.",
-    image:
-      "/images/bacterial-plasmids-coloured-transmission-electron-micrograph-tem-of-two-circles-or-plasmids-of-dna-from-bacteria-a-plasmid-is-a-length-of-dna-t-2ADG4FH.jpg",
+    image: "/images/card-fasta-contigs.svg",
   },
   {
     to: "/contact",

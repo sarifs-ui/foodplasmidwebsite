@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowRight, BarChart3 } from "lucide-react";
 
 import { useApi } from "../../api/useApi.js";
 import { categoryColor, categoryLabel } from "../../domain/categories.js";
+import { formatCount, formatPercent } from "../../lib/format.js";
 import { COLORS, FONT_MONO } from "../../theme/tokens.js";
 import { FigureFrame, SegmentedControl } from "../ui/index.jsx";
 
@@ -25,14 +26,22 @@ export function CategoryBars({ metric = "samples", onSelectCategory }) {
   const [selected, setSelected] = useState(null);
   const [scale, setScale] = useState("share");
 
+  // Shared by the caption and the bar geometry, so the two can never disagree.
+  const total = useMemo(
+    () => (data || []).reduce((sum, d) => sum + d.count, 0),
+    [data]
+  );
+
   return (
     <FigureFrame
       icon={BarChart3}
       title={isContigs ? "Plasmid Contig Share by Category" : "Sample Share by Category"}
       description={
-        isContigs
-          ? "How the 3.9 million plasmid contigs are distributed across food categories."
-          : "How the 4,690 samples are distributed across food categories."
+        total
+          ? `How the ${formatCount(total)} ${
+              isContigs ? "plasmid contigs" : "samples"
+            } are distributed across food categories.`
+          : undefined
       }
       loading={loading}
       error={error}
@@ -41,17 +50,17 @@ export function CategoryBars({ metric = "samples", onSelectCategory }) {
         // Bars are drawn as a share of the whole, not relative to the largest
         // category. Scaling to the maximum made the top category a permanently
         // full bar, which reads as "100%" rather than its actual ~53%.
-        const total = data.reduce((sum, d) => sum + d.count, 0) || 1;
+        const denominator = total || 1;
         const fractionOf = (d) => {
-          const share = d.count / total;
+          const share = d.count / denominator;
           if (share <= 0) return 0;
           // The log option keeps the long tail legible; it is off by default so
           // the honest proportions are what a reader sees first.
-          return scale === "log" ? Math.log1p(d.count) / Math.log1p(total) : share;
+          return scale === "log" ? Math.log1p(d.count) / Math.log1p(denominator) : share;
         };
 
         const formatValue = (d) =>
-          `${d.value}%  ·  ${d.count.toLocaleString("en-US")}`;
+          `${formatPercent(d.count / denominator)}  ·  ${formatCount(d.count)}`;
 
         return (
           <>

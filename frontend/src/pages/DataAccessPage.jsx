@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Download, Search } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Search, X } from "lucide-react";
 
 import { apiPostDownload } from "../api/client.js";
 import { useApi, useDebounced } from "../api/useApi.js";
@@ -8,6 +8,7 @@ import { FilterChip } from "../components/ui/FilterChip.jsx";
 import { ErrorBlock, LoadingBlock, SectionTitle } from "../components/ui/index.jsx";
 import { EXPORT_ANNOTATION_KEYS } from "../domain/annotations.js";
 import { categoryColor, categoryLabel } from "../domain/categories.js";
+import { formatCount } from "../lib/format.js";
 import { COLORS, FONT_BODY, FONT_MONO } from "../theme/tokens.js";
 
 const PAGE_SIZE = 25;
@@ -19,6 +20,17 @@ const MULTI_FILTERS = [
   { param: "subtype", label: "Subtype", optionsKey: "subtypes" },
   { param: "country", label: "Country", optionsKey: "countries" },
   { param: "year", label: "Year", optionsKey: "years" },
+];
+
+/** Table columns, in display order. `sort` is the key the API accepts. */
+const COLUMNS = [
+  { key: "id", label: "ID", sort: "id", mono: true },
+  { key: "category", label: "Category", sort: "category" },
+  { key: "type", label: "Type", sort: "type" },
+  { key: "subtype", label: "Subtype", sort: "subtype" },
+  { key: "country", label: "Country", sort: "country" },
+  { key: "year", label: "Year", sort: "year", mono: true },
+  { key: "contigs", label: "Plasmid Contigs", sort: "contigs", mono: true, align: "right" },
 ];
 
 const FERMENT_OPTIONS = [
@@ -55,7 +67,7 @@ export function DataAccessPage() {
     if (debouncedSearch) next.set("q", debouncedSearch);
     else next.delete("q");
     next.delete("page");
-    setSearchParams(next, { replace: true });
+    setSearchParams(next, { replace: true, preventScrollReset: true });
     // searchParams is intentionally read, not depended on, to avoid a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
@@ -74,6 +86,11 @@ export function DataAccessPage() {
     if (fermented) params.fermented = fermented;
     const q = searchParams.get("q");
     if (q) params.q = q;
+    const sort = searchParams.get("sort");
+    if (sort) {
+      params.sort = sort;
+      params.order = searchParams.get("order") === "desc" ? "desc" : "asc";
+    }
     return params;
   }, [searchParams, page]);
 
@@ -84,7 +101,7 @@ export function DataAccessPage() {
       const next = new URLSearchParams(searchParams);
       mutate(next);
       next.delete("page");
-      setSearchParams(next);
+      setSearchParams(next, { preventScrollReset: true });
     },
     [searchParams, setSearchParams]
   );
@@ -103,10 +120,39 @@ export function DataAccessPage() {
     [updateParams]
   );
 
+  const sortKey = searchParams.get("sort");
+  const sortOrder = searchParams.get("order") === "desc" ? "desc" : "asc";
+
+  /** Click a header to sort by it; click again to flip, a third time to clear. */
+  const toggleSort = useCallback(
+    (key) => {
+      const next = new URLSearchParams(searchParams);
+      if (sortKey !== key) {
+        next.set("sort", key);
+        next.set("order", "asc");
+      } else if (sortOrder === "asc") {
+        next.set("order", "desc");
+      } else {
+        next.delete("sort");
+        next.delete("order");
+      }
+      next.delete("page");
+      setSearchParams(next, { preventScrollReset: true });
+    },
+    [searchParams, setSearchParams, sortKey, sortOrder]
+  );
+
+  const clearAll = useCallback(() => {
+    setSearchInput("");
+    setSearchParams(new URLSearchParams(), { preventScrollReset: true });
+  }, [setSearchParams]);
+
   const activeFilterCount = MULTI_FILTERS.reduce(
     (sum, { param }) => sum + searchParams.getAll(param).length,
     0
   );
+  const hasActiveQuery =
+    activeFilterCount > 0 || Boolean(searchParams.get("fermented")) || Boolean(searchInput);
 
   const results = data?.results ?? [];
   const total = data?.total ?? 0;
@@ -137,7 +183,7 @@ export function DataAccessPage() {
   const goToPage = (nextPage) => {
     const next = new URLSearchParams(searchParams);
     next.set("page", String(nextPage));
-    setSearchParams(next);
+    setSearchParams(next, { preventScrollReset: true });
   };
 
   return (
@@ -218,17 +264,18 @@ export function DataAccessPage() {
               />
             </div>
 
-            {(activeFilterCount > 0 || searchParams.get("fermented") || searchInput) && (
+            {hasActiveQuery && (
               <button
                 type="button"
-                onClick={() => {
-                  setSearchInput("");
-                  setSearchParams(new URLSearchParams());
+                onClick={clearAll}
+                className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-2.5 rounded-xl"
+                style={{
+                  color: COLORS.deepOrange,
+                  border: `1.5px solid ${COLORS.deepOrange}40`,
                 }}
-                className="text-xs font-semibold px-3 py-2.5"
-                style={{ color: COLORS.deepOrange }}
               >
-                Clear all
+                <X size={12} aria-hidden="true" /> Clear all filters
+                {activeFilterCount > 0 && ` (${activeFilterCount})`}
               </button>
             )}
           </div>
@@ -236,8 +283,15 @@ export function DataAccessPage() {
 
         <div className="flex items-center justify-between mt-6 mb-3 flex-wrap gap-2">
           <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}>
-            {total.toLocaleString("en-US")} results
+            {formatCount(total)} results
             {selectedIds.length > 0 && ` · ${selectedIds.length} selected`}
+            {sortKey && (
+              <>
+                {" · sorted by "}
+                {COLUMNS.find((c) => c.sort === sortKey)?.label}
+                {sortOrder === "desc" ? " ↓" : " ↑"}
+              </>
+            )}
           </span>
           <div className="flex gap-2 items-center">
             {selectedIds.length > 0 && (
@@ -307,18 +361,43 @@ export function DataAccessPage() {
                       style={{ accentColor: COLORS.orange }}
                     />
                   </th>
-                  {["ID", "Category", "Host", "Country", "Type", "Year", "Contigs"].map(
-                    (heading) => (
+                  {COLUMNS.map((column) => {
+                    const isSorted = sortKey === column.sort;
+                    return (
                       <th
-                        key={heading}
+                        key={column.key}
                         scope="col"
-                        className="text-left px-3 py-2.5 text-xs font-semibold text-white"
-                        style={heading === "ID" ? { fontFamily: FONT_MONO } : undefined}
+                        aria-sort={
+                          isSorted
+                            ? sortOrder === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : "none"
+                        }
+                        className={`px-3 py-2.5 text-xs font-semibold text-white ${
+                          column.align === "right" ? "text-right" : "text-left"
+                        }`}
                       >
-                        {heading}
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(column.sort)}
+                          title={`Sort by ${column.label}`}
+                          className={`inline-flex items-center gap-1 hover:underline ${
+                            column.align === "right" ? "flex-row-reverse" : ""
+                          }`}
+                          style={{ color: "#fff", opacity: isSorted ? 1 : 0.85 }}
+                        >
+                          {column.label}
+                          {isSorted &&
+                            (sortOrder === "asc" ? (
+                              <ChevronUp size={12} aria-hidden="true" />
+                            ) : (
+                              <ChevronDown size={12} aria-hidden="true" />
+                            ))}
+                        </button>
                       </th>
-                    )
-                  )}
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -363,25 +442,27 @@ export function DataAccessPage() {
                         {categoryLabel(row.category)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 italic" style={{ color: COLORS.inkSoft }}>
-                      {row.host || "—"}
-                    </td>
-                    <td className="px-3 py-2">{row.countryName || row.country || "—"}</td>
                     <td className="px-3 py-2" style={{ color: COLORS.inkSoft }}>
                       {row.type || "—"}
                     </td>
+                    <td className="px-3 py-2" style={{ color: COLORS.inkSoft }}>
+                      {row.subtype || "—"}
+                    </td>
+                    <td className="px-3 py-2">{row.countryName || row.country || "—"}</td>
                     <td className="px-3 py-2" style={{ fontFamily: FONT_MONO }}>
                       {row.year || "—"}
                     </td>
-                    <td className="px-3 py-2" style={{ fontFamily: FONT_MONO }}>
-                      {row.sizeContigs?.toLocaleString("en-US") ?? "—"}
+                    <td className="px-3 py-2 text-right" style={{ fontFamily: FONT_MONO }}>
+                      {row.sizeContigs === null || row.sizeContigs === undefined
+                        ? "—"
+                        : formatCount(row.sizeContigs)}
                     </td>
                   </tr>
                 ))}
                 {results.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={COLUMNS.length + 1}
                       className="px-3 py-10 text-center text-sm"
                       style={{ color: COLORS.inkSoft }}
                     >

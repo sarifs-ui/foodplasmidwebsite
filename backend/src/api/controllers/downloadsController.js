@@ -1,10 +1,11 @@
 import archiver from "archiver";
 
 import {
+  MAX_RUN_IDS,
   allRunIds,
-  buildAnnotationCsv,
   buildMetadataCsv,
   isExportableKey,
+  streamAnnotationCsv,
 } from "../services/exportService.js";
 
 /**
@@ -15,11 +16,20 @@ import {
  * it actually wants; it is not inferred from any server-side filter state.
  */
 export async function exportArchive(req, res) {
-  const requestedIds = Array.isArray(req.body?.runIds)
+  const rawIds = Array.isArray(req.body?.runIds)
     ? req.body.runIds
     : Array.isArray(req.body?.sampleIds) // accepted for backwards compatibility
       ? req.body.sampleIds
       : [];
+
+  // Only well-formed string ids reach the query layer.
+  const requestedIds = rawIds.filter((id) => typeof id === "string" && id.length <= 64);
+
+  if (requestedIds.length > MAX_RUN_IDS) {
+    return res.status(400).json({
+      error: `Too many samples requested (max ${MAX_RUN_IDS}). Narrow the selection and try again.`,
+    });
+  }
 
   const wantMetadata = req.body?.include?.metadata !== false;
   const requestedAnnotations = Array.isArray(req.body?.include?.annotations)
@@ -50,8 +60,8 @@ export async function exportArchive(req, res) {
   }
 
   for (const key of requestedAnnotations) {
-    const csv = buildAnnotationCsv(key, runIds);
-    if (csv === null) {
+    const stream = streamAnnotationCsv(key, runIds);
+    if (stream === null) {
       archive.append(
         `The "${key}" table is not present in this deployment.\n` +
           `Run "npm run import-annotations" with the full source data to include it.\n`,
@@ -59,7 +69,9 @@ export async function exportArchive(req, res) {
       );
       continue;
     }
-    archive.append(csv, { name: `annotations/${key}.csv` });
+    // Appended as a stream so rows are compressed as they are read rather than
+    // held in memory.
+    archive.append(stream, { name: `annotations/${key}.csv` });
   }
 
   await archive.finalize();

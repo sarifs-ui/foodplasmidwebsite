@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { GitBranch, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 
 import { useApi } from "../../api/useApi.js";
@@ -9,7 +9,8 @@ import {
 } from "../../domain/categories.js";
 import { phylumColor } from "../../domain/phyla.js";
 import { arcPath, polar } from "../../lib/geometry.js";
-import { COLORS, FONT_MONO, clamp } from "../../theme/tokens.js";
+import { usePanZoom } from "../../lib/usePanZoom.js";
+import { COLORS, FONT_MONO } from "../../theme/tokens.js";
 import { FigureFrame } from "../ui/index.jsx";
 
 const SIZE = 900;
@@ -26,7 +27,6 @@ const BAR_LEN = 96;
 const LABEL_R = BAR_R0 + BAR_LEN + 8;
 /** Leaves fill 88% of their angular slot, leaving the white gutters of the reference. */
 const BAR_FILL = 0.88;
-const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const TREE_STROKE = "#1a1a1a";
 
@@ -42,7 +42,11 @@ const TREE_STROKE = "#1a1a1a";
  */
 export function RadialTaxonomy() {
   const { data, error, loading } = useApi("/api/stats/taxonomy");
-  const [zoom, setZoom] = useState(1);
+  const { containerRef, viewBox, zoomBy, reset, panHandlers } = usePanZoom({
+    width: SIZE,
+    height: SIZE,
+    maxZoom: MAX_ZOOM,
+  });
 
   const nodes = data?.nodes;
   const leaves = useMemo(() => (nodes || []).filter((n) => n.level === 3), [nodes]);
@@ -201,14 +205,11 @@ export function RadialTaxonomy() {
 
   // Zoom keeps the figure centred; there is no panning and nothing is clickable,
   // so the view can never end up somewhere the reader cannot get back from.
-  const viewSize = SIZE / zoom;
-  const viewOrigin = (SIZE - viewSize) / 2;
-
   return (
     <FigureFrame
       icon={GitBranch}
       title="Plasmid Host Cladogram"
-      description="Phylum to family. Each leaf carries a stacked bar showing the food categories that family occurs in; the dot on each tip is coloured by phylum."
+      description="Phylum to family. Each leaf carries a stacked bar showing the food categories that family occurs in; the dot on each tip is coloured by phylum. Scroll to zoom, drag to pan."
       loading={loading}
       error={error}
       className="lg:col-span-2"
@@ -227,7 +228,7 @@ export function RadialTaxonomy() {
             <div className="flex items-center justify-end gap-1 mb-2">
               <button
                 type="button"
-                onClick={() => setZoom((z) => clamp(z * 1.4, MIN_ZOOM, MAX_ZOOM))}
+                onClick={() => zoomBy(1.4)}
                 aria-label="Zoom in"
                 className="p-1.5 rounded-md"
                 style={{ border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
@@ -236,7 +237,7 @@ export function RadialTaxonomy() {
               </button>
               <button
                 type="button"
-                onClick={() => setZoom((z) => clamp(z / 1.4, MIN_ZOOM, MAX_ZOOM))}
+                onClick={() => zoomBy(1 / 1.4)}
                 aria-label="Zoom out"
                 className="p-1.5 rounded-md"
                 style={{ border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
@@ -245,7 +246,7 @@ export function RadialTaxonomy() {
               </button>
               <button
                 type="button"
-                onClick={() => setZoom(1)}
+                onClick={reset}
                 aria-label="Reset zoom"
                 className="p-1.5 rounded-md"
                 style={{ border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
@@ -269,9 +270,9 @@ export function RadialTaxonomy() {
                 }))}
               />
 
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0" ref={containerRef} {...panHandlers}>
                 <svg
-                  viewBox={`${viewOrigin} ${viewOrigin} ${viewSize} ${viewSize}`}
+                  viewBox={viewBox}
                   className="w-full"
                   style={{ maxHeight: isFullscreen ? "100%" : "78vh" }}
                   role="img"
@@ -282,6 +283,16 @@ export function RadialTaxonomy() {
                     Each tip is marked with a phylum-coloured dot and followed by a stacked
                     bar split by food category.
                   </desc>
+
+                  {/* Closed ring the phyla hang off, as in the reference figure. */}
+                  <circle
+                    cx={CX}
+                    cy={CY}
+                    r={ROOT_R}
+                    fill="none"
+                    stroke={TREE_STROKE}
+                    strokeWidth={1.1}
+                  />
 
                   {rendered.branches.map((branch) => (
                     <path

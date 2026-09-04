@@ -72,14 +72,29 @@ export const DATASETS = {
   },
 };
 
-export function datasetPath(key) {
+/**
+ * Locate a dataset on disk.
+ *
+ * The committed sources are stored gzipped (12 MB of CSV compresses to about
+ * 0.7 MB, which keeps the repository small). A plain, uncompressed file takes
+ * precedence if present, so a contributor can drop one in without renaming.
+ */
+export function resolveDatasetPath(key) {
   const spec = DATASETS[key];
   if (!spec) throw new Error(`Unknown dataset: ${key}`);
-  return dataFile(spec.file);
+  const plain = dataFile(spec.file);
+  if (fs.existsSync(plain)) return { path: plain, gzipped: false };
+  const gz = dataFile(`${spec.file}.gz`);
+  if (fs.existsSync(gz)) return { path: gz, gzipped: true };
+  return { path: plain, gzipped: false, missing: true };
+}
+
+export function datasetPath(key) {
+  return resolveDatasetPath(key).path;
 }
 
 export function datasetExists(key) {
-  return fs.existsSync(datasetPath(key));
+  return !resolveDatasetPath(key).missing;
 }
 
 /** Dataset keys whose source file is small enough to commit. */

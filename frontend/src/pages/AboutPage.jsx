@@ -8,10 +8,15 @@ import { RadialTaxonomy } from "../components/figures/RadialTaxonomy.jsx";
 import { RibbonChord } from "../components/figures/RibbonChord.jsx";
 import { WorldMap } from "../components/figures/WorldMap.jsx";
 import { SectionTitle } from "../components/ui/index.jsx";
+import { useApi } from "../api/useApi.js";
+import { formatCount } from "../lib/format.js";
 import { COLORS, FONT_BODY } from "../theme/tokens.js";
 
 export function AboutPage() {
   const navigate = useNavigate();
+  // The scope sentence reads from the live dataset rather than hardcoded
+  // figures, so it cannot drift out of date after a re-import.
+  const { data: overview } = useApi("/api/stats/overview");
 
   const goToSamples = (params) => {
     navigate(`/samples?${new URLSearchParams(params).toString()}`);
@@ -27,42 +32,55 @@ export function AboutPage() {
           style={{ color: COLORS.ink, fontFamily: FONT_BODY, textAlign: "left" }}
         >
           <p>
-            Food is not just a cultural product — it is a living microbial ecosystem. Fermented
-            dairy, wines, soy sauce and hundreds of other foods across every culture carry dynamic
-            microbial communities and mobile genetic elements that continuously move between
-            animals, the environment and humans. At the centre of that ecosystem sit{" "}
-            <strong>plasmids</strong>: circular, self-replicating DNA molecules that move between
-            bacteria independently of the host chromosome, carrying traits like antibiotic
-            resistance, stress tolerance and enzyme production.
+            Foods are microbial ecosystems, and the bacteria in them
+            carry mobile genetic elements that circulate between the food chain, the environment,
+            livestock and people. Chief among these are <strong>plasmids</strong>: circular DNA
+            molecules that replicate independently of the bacterial chromosome and transfer between
+            cells, carrying accessory traits with them.
           </p>
           <p>
-            Plasmids matter for both the technological and the safety sides of food. In
-            fermentation they often encode traits central to the process itself — lactose and
-            citrate utilisation, cell-envelope proteinases, exopolysaccharide synthesis and
-            bacteriocins — alongside carbohydrate-active enzymes, heavy-metal resistance and
-            defence systems such as CRISPR-Cas. They are also key vectors for{" "}
-            <strong>antimicrobial resistance (AMR)</strong> genes, which makes food a direct route
-            by which resistance genes can reach the human gut.
+            In a food context those traits cut two ways. Plasmids frequently encode functions
+            central to fermentation itself — lactose and citrate utilisation, cell-envelope
+            proteinases, exopolysaccharide synthesis and bacteriocin production — alongside
+            carbohydrate-active enzymes, heavy-metal resistance and CRISPR-Cas defence systems.
+            They are also principal vehicles for <strong>antimicrobial resistance (AMR)</strong>{" "}
+            determinants, which makes the food chain a plausible route by which resistance genes
+            reach the human gut.
           </p>
           <p>
-            Most plasmid research to date has focused on clinical settings — the human gut,
-            bloodstream infections — or on environmental reservoirs like soil and water. Where food
-            has been studied at all, it has mostly meant animal agriculture rather than the broader
-            range of food people actually eat. The food-derived plasmidome has remained largely
-            unexplored. GFPR was built to close that gap.
+            Plasmid biology has nonetheless been characterised largely in clinical settings — the
+            human gut, bloodstream infection — and in environmental reservoirs such as soil and
+            water. Where food has been sampled at all, it has usually meant animal production
+            rather than the breadth of what people actually eat. The food-derived plasmidome has
+            consequently remained poorly described.
           </p>
           <p>
-            For every sample, plasmid host taxonomy is predicted down to the family level, and
-            contigs are annotated across six functional dimensions:{" "}
+            GFPR was assembled to address that gap: a systematic, openly accessible catalogue of
+            plasmid sequences recovered from food-associated metagenomes.
+            {overview ? (
+              <>
+                {" "}It currently comprises{" "}
+                <strong>{formatCount(overview.totalPlasmidContigs)}</strong> plasmid contigs from{" "}
+                <strong>{formatCount(overview.totalSamples)}</strong> samples spanning{" "}
+                <strong>{overview.categories}</strong> food categories and{" "}
+                <strong>{overview.countries}</strong> countries, drawn from{" "}
+                {(overview.databaseOrigins || []).length} public and in-house sources.
+              </>
+            ) : null}
+          </p>
+          <p>
+            For every sample, plasmid host taxonomy is resolved to family level, and contigs are
+            annotated across six functional dimensions:{" "}
             <strong>AMR &amp; stress response genes</strong>, <strong>CAZymes</strong>,{" "}
             <strong>CRISPR-Cas systems</strong>, <strong>antimicrobial peptides</strong>,{" "}
             <strong>anticancer peptides</strong>, and{" "}
-            <strong>Pfam / KEGG orthology groups</strong>.
+            <strong>Pfam / KEGG orthology groups</strong>. Every record is traceable to its source
+            run accession, and the underlying tables can be exported in full.
           </p>
           <p className="text-sm" style={{ color: COLORS.inkSoft }}>
-            Every sample follows a <strong>Category → Type → Subtype</strong> hierarchy and is
-            separately tagged as <strong>fermented</strong> or <strong>non-fermented</strong> —
-            both are filterable on the Data Access page.
+            Samples follow a <strong>Category → Type → Subtype</strong> hierarchy and are
+            separately labelled <strong>fermented</strong> or <strong>non-fermented</strong>; both
+            are filterable on the Data Access page.
           </p>
 
           <div className="flex flex-wrap items-center justify-start gap-5 mt-2">
@@ -92,7 +110,6 @@ export function AboutPage() {
         <div className="mt-14">
           <SectionTitle title="Explore the data" />
           <div className="grid lg:grid-cols-2 gap-6 mt-8">
-            <RadialTaxonomy />
             <CategoryBars
               metric="samples"
               onSelectCategory={(category) => goToSamples({ category })}
@@ -101,8 +118,9 @@ export function AboutPage() {
               metric="contigs"
               onSelectCategory={(category) => goToSamples({ category })}
             />
-            <RibbonChord onSelectCategory={(category) => goToSamples({ category })} />
             <WorldMap onSelectCountry={(country) => goToSamples({ country })} />
+            <RadialTaxonomy />
+            <RibbonChord onSelectCategory={(category) => goToSamples({ category })} />
           </div>
         </div>
       </section>

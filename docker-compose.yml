@@ -1,0 +1,24 @@
+services:
+  gfpr:
+    build: .
+    image: gfpr
+    container_name: gfpr
+    ports:
+      - "${PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
+    # The image is self-contained: the sample table and every figure's data are
+    # baked in at build time, so no volume is required.
+    #
+    # To additionally serve gene-level annotation hits, build the optional
+    # database (see README) and uncomment:
+    # volumes:
+    #   - ./backend/data/gfpr.db:/app/backend/data/gfpr.db:ro

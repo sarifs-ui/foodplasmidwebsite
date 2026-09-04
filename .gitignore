@@ -32,3 +32,10 @@ dist-ssr
 # Ayrıntılı kurallar backend/.gitignore içinde: data/ klasöründe sadece
 # küçük kaynak dosyalar (All_Data.csv, acp.csv, *.py) repoya girer; import
 # çıktıları ve Google Drive paketi yok sayılır.
+
+# Environment files. This project has no secrets today — every setting is a
+# path or a port — but the rule is here so that a future .env holding one can
+# never be committed by accident. .env.example is the template and stays.
+.env
+.env.*
+!.env.example

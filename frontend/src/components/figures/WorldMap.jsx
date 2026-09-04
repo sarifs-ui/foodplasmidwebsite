@@ -15,26 +15,46 @@ const MODE_OPTIONS = [
   { value: "category", label: "Dominant category" },
 ];
 
-const NO_DATA_FILL = "#EDF1F5";
+const NO_DATA_FILL = "#ECECEA";
+const BORDER = "#FFFFFF";
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 8;
 
-/** Sequential light-to-dark blue. */
-const BLUE_LIGHT = { h: 205, s: 72, l: 92 };
-const BLUE_DARK = { h: 218, s: 88, l: 22 };
+/**
+ * Sequential teal ramp, light to dark, built on the project's #006060 base so
+ * the map sits in the same colour family as the rest of the site.
+ *
+ * The stops are evenly spaced and interpolated in RGB, matching how
+ * matplotlib's LinearSegmentedColormap.from_list treats the same list.
+ */
+const RAMP = ["#DCF0EC", "#A9DED4", "#6FC5B8", "#3AA79C", "#12897F", "#006060", "#00393B"];
+
+const RAMP_RGB = RAMP.map((hex) => [
+  Number.parseInt(hex.slice(1, 3), 16),
+  Number.parseInt(hex.slice(3, 5), 16),
+  Number.parseInt(hex.slice(5, 7), 16),
+]);
+
+/** Sample the ramp at t in [0, 1]. */
+function rampColor(t) {
+  const clamped = Math.min(1, Math.max(0, t));
+  const scaled = clamped * (RAMP_RGB.length - 1);
+  const i = Math.min(RAMP_RGB.length - 2, Math.floor(scaled));
+  const f = scaled - i;
+  const [r1, g1, b1] = RAMP_RGB[i];
+  const [r2, g2, b2] = RAMP_RGB[i + 1];
+  const mix = (a, b) => Math.round(a + (b - a) * f);
+  return `rgb(${mix(r1, r2)}, ${mix(g1, g2)}, ${mix(b1, b2)})`;
+}
 
 /**
- * Counts span three orders of magnitude (1 to ~1,200 samples; up to ~1.2M
- * contigs), so intensity is assigned on a log scale — a linear ramp would leave
- * everything except the top few countries at the palest tone.
+ * Counts span three orders of magnitude (1 to ~1,200 samples; up to ~1.1M
+ * contigs), so position on the ramp is assigned on a log scale — a linear one
+ * would leave everything except the top few countries at the palest tone.
  */
-function blueScale(value, maxValue) {
+function tealScale(value, maxValue) {
   if (!value) return NO_DATA_FILL;
-  const t = Math.min(1, Math.log1p(value) / Math.log1p(maxValue || 1));
-  const h = BLUE_LIGHT.h + (BLUE_DARK.h - BLUE_LIGHT.h) * t;
-  const sat = BLUE_LIGHT.s + (BLUE_DARK.s - BLUE_LIGHT.s) * t;
-  const l = BLUE_LIGHT.l + (BLUE_DARK.l - BLUE_LIGHT.l) * t;
-  return `hsl(${h.toFixed(1)}, ${sat.toFixed(1)}%, ${l.toFixed(1)}%)`;
+  return rampColor(Math.log1p(value) / Math.log1p(maxValue || 1));
 }
 
 /**
@@ -167,13 +187,13 @@ export function WorldMap({ onSelectCountry }) {
                         ? NO_DATA_FILL
                         : mode === "category"
                           ? categoryColor(row.category)
-                          : blueScale(row[valueField], maxValue);
+                          : tealScale(row[valueField], maxValue);
                       return (
                         <Geography
                           key={geo.rsmKey}
                           geography={geo}
                           fill={fill}
-                          stroke="#fff"
+                          stroke={BORDER}
                           strokeWidth={(isActive ? 1.2 : 0.4) / position.zoom}
                           tabIndex={row ? 0 : -1}
                           role={row ? "button" : undefined}
@@ -216,9 +236,7 @@ export function WorldMap({ onSelectCountry }) {
               <div
                 className="h-2 flex-1 rounded-full"
                 style={{
-                  background: `linear-gradient(to right, ${[0, 0.25, 0.5, 0.75, 1]
-                    .map((t) => blueScale(Math.expm1(t * Math.log1p(maxValue)), maxValue))
-                    .join(", ")})`,
+                  background: `linear-gradient(to right, ${RAMP.join(", ")})`,
                 }}
               />
               <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>

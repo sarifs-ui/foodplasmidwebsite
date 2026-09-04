@@ -1,27 +1,35 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import cors from "cors";
 import express from "express";
 import morgan from "morgan";
 
 import apiRouter from "./api/routes/index.js";
+import { errorHandler, notFound } from "./api/middleware/errorHandler.js";
+import { corsPolicy, securityHeaders } from "./api/middleware/security.js";
 import { FRONTEND_DIST } from "./config/paths.js";
 
 export const app = express();
 
-// CORS matters only in development: `npm run dev` serves the UI from Vite on
-// port 5173 and proxies /api here. In production both come from this server,
-// so requests are same-origin and CORS never engages.
-app.use(cors());
-app.use(express.json());
+// Do not advertise the framework.
+app.disable("x-powered-by");
+
+// Correct client IPs when deployed behind a reverse proxy, which the rate
+// limiter keys on. Off by default: trusting these headers unconditionally
+// would let any client spoof its address.
+if (process.env.TRUST_PROXY) app.set("trust proxy", process.env.TRUST_PROXY);
+
+app.use(securityHeaders);
+app.use(corsPolicy);
+// 100 kB is ample for an id list and a contact message.
+app.use(express.json({ limit: "100kb" }));
 app.use(morgan("dev"));
 
 app.use("/api", apiRouter);
 
 // Unknown /api paths must always return JSON. This has to precede the SPA
 // fallback below, otherwise a typo'd endpoint would silently return index.html.
-app.use("/api", (req, res) => res.status(404).json({ error: "Not found" }));
+app.use("/api", notFound);
 
 // Single port: this server also serves the built frontend.
 if (fs.existsSync(FRONTEND_DIST)) {
@@ -45,3 +53,6 @@ if (fs.existsSync(FRONTEND_DIST)) {
       );
   });
 }
+
+// Last: turns any thrown error into JSON without leaking a stack trace.
+app.use(errorHandler);

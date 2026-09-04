@@ -1,14 +1,31 @@
 # GFPR — Global Food Plasmidome Resource
 
-An open, browsable catalogue of plasmids mined from food-derived metagenomic
-samples — antimicrobial resistance genes, carbohydrate-active enzymes,
+An open, browsable catalogue of plasmids recovered from food-associated
+metagenomes: antimicrobial resistance genes, carbohydrate-active enzymes,
 CRISPR-Cas systems and other functional annotations, searchable by food
 category, country and host organism.
 
-## Quick start
+The repository ships with the full dataset, so both setups below give you a
+working site with real data — no downloads, no database server, no API keys.
 
-You need **Node.js 18+** ([nodejs.org](https://nodejs.org/)) and nothing else —
-no Python, no database server, no API keys.
+---
+
+## Run with Docker
+
+```bash
+git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
+cd foodplasmidwebsite
+docker compose up --build
+```
+
+Open **<http://localhost:4000>**.
+
+To use a different port: `PORT=8080 docker compose up --build`.
+Stop with `Ctrl+C`, or `docker compose down`.
+
+## Run without Docker
+
+Requires **Node.js 18+** ([nodejs.org](https://nodejs.org/)).
 
 ```bash
 git clone https://github.com/sarifs-ui/foodplasmidwebsite.git
@@ -17,151 +34,91 @@ npm install
 npm start
 ```
 
-Then open **<http://localhost:4000>**.
+Open **<http://localhost:4000>**.
 
-That is the whole setup. `npm install` imports the bundled sample table, so a
-fresh clone renders **every figure and every page with real data** — no extra
-downloads.
+For development with hot reload — API on 4000, UI on 5173:
 
-## How it runs
+```bash
+npm run dev
+```
 
-Everything is served from a **single port**. The Express backend serves both the
-JSON API and the built React frontend:
+---
+
+## How it works
+
+The Express backend serves the JSON API and the built React frontend from a
+single port:
 
 ```
 http://localhost:4000
-  ├── /api/*   → JSON API (Express)
-  └── /*       → React app (frontend/dist)
+  ├── /api/*   → JSON API
+  └── /*       → React app
 ```
 
-Because both come from the same origin, the frontend calls the API with plain
-relative paths (`/api/samples`) — there is no host or port to configure.
-
-## Data
-
-The dataset splits into three tiers by size. This is what makes a bare clone
-work without a multi-hundred-megabyte download.
-
-| Tier | Contents | Size | In the repo? |
-|---|---|---|---|
-| **A** — source tables | `metadata.csv`, `chord.csv`, `amr-rgi-consensus.csv`, `cazyme.csv`, `amp_all.csv`, `cctyper.csv`, `acp_all.csv` | ~12 MB | **yes** |
-| **B** — derived artifact | `gfpr.derived.json` — taxonomy tree, host per run, top Pfam/KO terms | ~410 KB | **yes** |
-| **C** — heavy sources | `family_assigned.csv` (69 MB), `merged_pfam_kofam.csv` (319 MB) | ~390 MB | no |
-
-**`metadata.csv` is the master table.** Its `Run_ID` column is the primary key
-for the whole project: every annotation file joins on it at 100% coverage. Note
-that the file ends with a `Total` summary row, which the importer drops — if a
-headline number ever looks exactly doubled, that row got through.
-
-**`chord.csv` is an external input, not a derivative.** It is the published
-category × feature-class matrix and cannot be recomputed from the other files;
-three of its six classes (heat resistance, heavy-metal resistance, virulence)
-have no per-gene source at all.
-
-### Without Tier C
-
-Tier C only adds **gene-level hit lists** on the sample detail page and the
-`pfam_ko` / `host_taxonomy` tables in exports. Everything else — all five
-figures, the taxonomy tree, host labels, per-sample Pfam/KO *counts*, filters,
-and metadata export — works from Tiers A and B alone.
-
-To load Tier C, place the two files in `backend/data/` and run:
-
-```bash
-npm run import-annotations   # builds backend/data/gfpr.db (~500 MB, ~40 s)
-npm run build-derived        # regenerates gfpr.derived.json from them
-```
-
-`build-derived` refuses to run without both heavy files, so a contributor who
-lacks them cannot accidentally commit a blanked artifact.
+`npm install` (and the Docker build) imports the bundled sample table
+automatically, which is why the site has data on first launch.
 
 ## Commands
 
-Run these from the repository root.
-
 | Command | What it does |
 |---|---|
-| `npm install` | Installs both workspaces and imports the sample table |
-| `npm start` | Builds the frontend, then serves everything on port 4000 |
-| `npm run dev` | Development mode with hot reload (API on 4000, Vite on 5173) |
-| `npm run build` | Builds the frontend into `frontend/dist/` |
-| `npm run serve` | Serves without rebuilding |
-| `npm run lint` | Lints the frontend with oxlint |
-| `npm run import-data` | Re-imports the sample table from `metadata.csv` |
-| `npm run import-annotations` | Imports the gene-level annotation database (needs Tier C) |
-| `npm run build-derived` | Regenerates `gfpr.derived.json` (needs Tier C) |
+| `npm start` | Build the frontend, then serve everything on port 4000 |
+| `npm run dev` | Development mode with hot reload |
+| `npm run build` | Build the frontend into `frontend/dist/` |
+| `npm run lint` | Lint the frontend |
+| `npm run import-data` | Re-import the sample table |
 
-## API
+## Data
 
-| Method | Path | Returns |
-|---|---|---|
-| `GET` | `/api/health` | Status, sample count, which tiers are loaded |
-| `GET` | `/api/stats/overview` | Headline counters |
-| `GET` | `/api/stats/category-share` | Samples per food category |
-| `GET` | `/api/stats/contig-share` | Plasmid contigs per food category |
-| `GET` | `/api/stats/annotation-flow` | Category × feature-class matrix (chord) |
-| `GET` | `/api/stats/taxonomy` | Phylum→family tree with category composition |
-| `GET` | `/api/stats/map` | Per-country counts, with ISO alpha-3 and numeric codes |
-| `GET` | `/api/samples` | Paged, filterable sample list |
-| `GET` | `/api/samples/filters` | Distinct values for each filter |
-| `GET` | `/api/samples/:id` | One sample plus its annotations |
-| `POST` | `/api/downloads/export` | Streams a zip of metadata + annotation CSVs |
-| `GET` | `/api/raw-data/links` | Registry of external raw-contig archives |
-| `POST` | `/api/contact` | Contact form (logs to the server; no mail transport) |
+`backend/data/` holds the dataset as gzipped tables (~730 KB in total):
 
-## Docker
+| File | Contents |
+|---|---|
+| `metadata.csv.gz` | 4,690 samples — the master table |
+| `chord.csv.gz` | Category × feature-class matrix |
+| `amr-rgi-consensus.csv.gz` | Resistance gene calls |
+| `cazyme.csv.gz` | Carbohydrate-active enzymes |
+| `amp_all.csv.gz`, `acp_all.csv.gz` | Peptide predictions |
+| `cctyper.csv.gz` | CRISPR-Cas systems |
+| `gfpr.derived.json.gz` | Precomputed taxonomy tree and top Pfam/KO terms |
 
-Everything ships as **one image**, serving the API and the built UI from a
-single port.
+`Run_ID` in `metadata.csv.gz` is the key every other table joins on.
+
+### Optional: gene-level annotations
+
+Two source files are too large to distribute here (`family_assigned.csv`,
+69 MB; `merged_pfam_kofam.csv`, 319 MB). Without them everything works except
+the per-sample gene hit lists on the sample detail page. To add them, place
+both in `backend/data/` and run:
 
 ```bash
-docker build -t gfpr .
-docker run --rm -p 4000:4000 gfpr
+npm run import-annotations   # builds backend/data/gfpr.db (~500 MB)
+npm run build-derived        # regenerates gfpr.derived.json.gz
 ```
 
-Open <http://localhost:4000>. The image bakes in Tiers A and B, so it runs
-standalone with real data. To add Tier C, mount the database:
+Then uncomment the `volumes:` block in `docker-compose.yml` to mount the
+database into the container.
 
-```bash
-docker run --rm -p 4000:4000 \
-  -v "$PWD/backend/data/gfpr.db:/app/backend/data/gfpr.db:ro" \
-  gfpr
-```
+## Configuration
 
-Change the port with `-e PORT=8080 -p 8080:8080`.
+No configuration is required. To change something, copy
+`backend/.env.example` to `backend/.env`; the usual knob is `PORT`.
 
 ## Project structure
 
 ```
-.
-├── package.json              # workspace root — every command lives here
-├── Dockerfile                # single image: API + built frontend
-├── backend/
-│   ├── data/                 # source CSVs (tiers A/B committed, C ignored)
-│   └── src/
-│       ├── config/           # paths, env, country table, annotation registry
-│       ├── data/             # cached loaders: samples, derived, SQLite
-│       ├── ingest/           # importers
-│       │   ├── lib/          # CSV reader, coercion, bulk load, dataset specs
-│       │   └── sources/      # one module per source file
-│       ├── api/              # routes, controllers, services
-│       └── utils/            # CSV writer
-└── frontend/
-    ├── src/
-    │   ├── api/              # fetch client + useApi hook
-    │   ├── theme/            # design tokens, global styles
-    │   ├── domain/           # categories, annotations, navigation
-    │   ├── lib/              # SVG geometry
-    │   ├── components/       # ui/ atoms, figures/ charts
-    │   └── pages/            # one module per route
-    └── vite.config.js        # dev proxy for /api
+backend/
+  data/                  gzipped source tables
+  src/
+    config/              paths, country table, annotation registry
+    data/                cached loaders
+    ingest/              importers
+    api/                 routes, controllers, services
+frontend/
+  src/
+    api/                 fetch client + hooks
+    theme/               design tokens
+    domain/              categories, annotations, navigation
+    components/          ui atoms + figures
+    pages/               one module per route
 ```
-
-## Configuration
-
-Every setting has a working default, so **no `.env` file is required**. To
-override something, copy `backend/.env.example` to `backend/.env`; the most
-useful knob is `PORT`.
-
-The frontend understands `VITE_API_BASE`, empty by default (same origin). Set it
-only if the UI should talk to a backend on another host.

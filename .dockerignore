@@ -1,10 +1,10 @@
-# Keep the build context small. backend/data holds several hundred megabytes of
-# source CSVs that the image does not need.
+# Keep the build context small.
 
 .git
 .gitignore
 .dockerignore
 Dockerfile
+docker-compose.yml
 README.md
 
 node_modules
@@ -22,15 +22,15 @@ npm-debug.log*
 ~$*
 *:Zone.Identifier
 
-# Everything under backend/data is excluded except the small source CSVs the
-# image needs to build its sample table, plus the committed derived artifact.
+# backend/data holds several hundred megabytes of optional source files and a
+# generated database. Only the small gzipped tables the image needs get through.
 # (Docker's matcher requires the dir/* + !dir/file form.)
 backend/data/*
-!backend/data/metadata.csv
-!backend/data/chord.csv
-!backend/data/amr-rgi-consensus.csv
-!backend/data/cazyme.csv
-!backend/data/amp_all.csv
-!backend/data/cctyper.csv
-!backend/data/acp_all.csv
-!backend/data/gfpr.derived.json
+!backend/data/metadata.csv.gz
+!backend/data/chord.csv.gz
+!backend/data/amr-rgi-consensus.csv.gz
+!backend/data/cazyme.csv.gz
+!backend/data/amp_all.csv.gz
+!backend/data/cctyper.csv.gz
+!backend/data/acp_all.csv.gz
+!backend/data/gfpr.derived.json.gz

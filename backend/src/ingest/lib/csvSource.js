@@ -1,9 +1,10 @@
 import fs from "node:fs";
+import zlib from "node:zlib";
 
 import { parse } from "csv-parse";
 import { parse as parseSync } from "csv-parse/sync";
 
-import { DATASETS, datasetPath } from "./datasets.js";
+import { DATASETS, resolveDatasetPath } from "./datasets.js";
 
 /**
  * Shared csv-parse options.
@@ -25,19 +26,26 @@ function optionsFor(key) {
   };
 }
 
-/** Read a whole dataset into memory. Only for the small (committed) files. */
+/**
+ * Read a whole dataset into memory, transparently decompressing a .gz file.
+ * Only for the small (committed) sources.
+ */
 export function readRows(key) {
-  const file = datasetPath(key);
-  return parseSync(fs.readFileSync(file), optionsFor(key));
+  const { path, gzipped } = resolveDatasetPath(key);
+  const raw = fs.readFileSync(path);
+  return parseSync(gzipped ? zlib.gunzipSync(raw) : raw, optionsFor(key));
 }
 
 /**
- * Stream a dataset row by row.
+ * Stream a dataset row by row, transparently decompressing a .gz file.
  *
- * Used for the two heavy files: merged_pfam_kofam.csv would need several GB of
- * heap if materialised, and reading it as one string exceeds V8's maximum
+ * Used for the two heavy sources: merged_pfam_kofam.csv would need several GB
+ * of heap if materialised, and reading it as one string exceeds V8's maximum
  * string length outright.
  */
 export function streamRows(key) {
-  return fs.createReadStream(datasetPath(key)).pipe(parse(optionsFor(key)));
+  const { path, gzipped } = resolveDatasetPath(key);
+  const file = fs.createReadStream(path);
+  const bytes = gzipped ? file.pipe(zlib.createGunzip()) : file;
+  return bytes.pipe(parse(optionsFor(key)));
 }

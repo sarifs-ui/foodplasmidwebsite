@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 200" width="900" height="200" role="img" aria-label="Illustration of plasmid contig sequences in FASTA format">
+  <!-- Representative illustration of the downloadable contig archives: FASTA
+       records keyed by run accession.
+
+       Content sits in the right-hand two-fifths on purpose — the card overlays
+       a gradient and its title on the left. -->
+  <defs>
+    <linearGradient id="fastaFadeLeft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#F6FAF9" stop-opacity="1" />
+      <stop offset="100%" stop-color="#F6FAF9" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="fastaFadeBottom" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F6FAF9" stop-opacity="0" />
+      <stop offset="100%" stop-color="#F6FAF9" stop-opacity="0.95" />
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="200" fill="#F6FAF9" />
+
+  <g font-family="'IBM Plex Mono', ui-monospace, Consolas, monospace" font-size="13">
+    <!-- Record 1 -->
+    <text x="360" y="42" fill="#B35900" font-weight="600">&gt;SRR28523097_contig_7</text>
+    <text x="612" y="42" fill="#8A8A8A">len=18904</text>
+    <text x="360" y="62" fill="#3E5C5C" letter-spacing="1.2">
+      <tspan fill="#006060">ATG</tspan>ACAGCTTATCATCGACTGCACGGTGCACCA<tspan fill="#3AA79C">ATG</tspan>CTTCTGGCGTCAGG
+    </text>
+    <text x="360" y="82" fill="#3E5C5C" letter-spacing="1.2">
+      ATCGGAAGCTGTGGTATGGCTGTGCAGGTCGTAAATCACTGCATAATT
+    </text>
+
+    <!-- Record 2 -->
+    <text x="360" y="118" fill="#B35900" font-weight="600">&gt;DRR205701_contig_12</text>
+    <text x="612" y="118" fill="#8A8A8A">len=7331</text>
+    <text x="360" y="138" fill="#3E5C5C" letter-spacing="1.2">
+      GCTAACGTTAGCCAGGATCC<tspan fill="#006060">GTT</tspan>AAGCTTGCATGCCTGCAGGTCGAC
+    </text>
+
+    <!-- Fading third record, so the file reads as an excerpt -->
+    <g opacity="0.4">
+      <text x="360" y="170" fill="#B35900" font-weight="600">&gt;ERR13737143_contig_1</text>
+      <text x="612" y="170" fill="#8A8A8A">len=4212</text>
+      <text x="360" y="190" fill="#3E5C5C" letter-spacing="1.2">
+        TTACGGCTAAGCCTGATCAGGTTACCGATAAGCTTGCAGGTCAACGT
+      </text>
+    </g>
+  </g>
+
+  <rect x="0" y="150" width="900" height="50" fill="url(#fastaFadeBottom)" />
+  <!-- Dissolve the left edge before it reaches the card title -->
+  <rect x="300" y="0" width="140" height="200" fill="url(#fastaFadeLeft)" />
+  <rect x="0" y="0" width="300" height="200" fill="#F6FAF9" />
+</svg>

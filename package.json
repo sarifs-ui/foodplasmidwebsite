@@ -2,7 +2,7 @@
   "name": "gfpr",
   "version": "1.0.0",
   "private": true,
-  "description": "GFPR \u2014 Global Food Plasmidome Resource (API + web UI on a single port)",
+  "description": "GFPR — Global Food Plasmidome Resource (API + web UI on a single port)",
   "workspaces": [
     "frontend",
     "backend"
@@ -25,5 +25,9 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
+  },
+  "overrides": {
+    "qs": "^6.16.0",
+    "d3-color": "^3.1.0"
   }
 }

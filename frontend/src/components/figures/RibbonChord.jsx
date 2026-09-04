@@ -1,22 +1,24 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, Waves } from "lucide-react";
+import { ArrowRight, RotateCcw, Waves, ZoomIn, ZoomOut } from "lucide-react";
 
 import { useApi } from "../../api/useApi.js";
 import { flowClassColor } from "../../domain/annotations.js";
 import { categoryColor, categoryLabel } from "../../domain/categories.js";
 import { arcPath, buildChordLayout, polar, ribbonPath } from "../../lib/geometry.js";
+import { usePanZoom } from "../../lib/usePanZoom.js";
 import { COLORS, FONT_MONO } from "../../theme/tokens.js";
 import { FigureFrame } from "../ui/index.jsx";
 
-// The viewBox leaves room for radial labels, the longest of which
-// ("Fermented Fruits and Vegetables") extends about 160px past LABEL_R.
+// The ring is sized to fill the viewBox, leaving only the margin the radial
+// labels need — the longest ("Fermented Fruits and Vegetables") extends about
+// 165px past LABEL_R at this font size.
 const WIDTH = 1000;
-const HEIGHT = 960;
+const HEIGHT = 1000;
 const CX = 500;
-const CY = 470;
-const R = 230;
-const OUTER_R = 245;
-const LABEL_R = 258;
+const CY = 500;
+const R = 292;
+const OUTER_R = 310;
+const LABEL_R = 320;
 
 /**
  * Labels follow their radius, flipped on the lower half of the ring so they
@@ -51,6 +53,11 @@ export function RibbonChord({ onSelectCategory }) {
   const [hoveredCategory, setHoveredCategory] = useState(null);
   const [hoveredClass, setHoveredClass] = useState(null);
   const [selected, setSelected] = useState(null);
+  const { containerRef, viewBox, zoomBy, reset, dragging, panHandlers } = usePanZoom({
+    width: WIDTH,
+    height: HEIGHT,
+    maxZoom: 8,
+  });
 
   const layout = useMemo(() => {
     if (!data) return null;
@@ -90,10 +97,41 @@ export function RibbonChord({ onSelectCategory }) {
 
         return (
           <>
+            <div className="flex items-center justify-end gap-1 mb-1">
+              <button
+                type="button"
+                onClick={() => zoomBy(1.4)}
+                aria-label="Zoom in"
+                className="p-1.5 rounded-md"
+                style={{ border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
+              >
+                <ZoomIn size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => zoomBy(1 / 1.4)}
+                aria-label="Zoom out"
+                className="p-1.5 rounded-md"
+                style={{ border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
+              >
+                <ZoomOut size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={reset}
+                aria-label="Reset view"
+                className="p-1.5 rounded-md"
+                style={{ border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
+              >
+                <RotateCcw size={13} />
+              </button>
+            </div>
+
+            <div ref={containerRef} {...panHandlers}>
             <svg
-              viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+              viewBox={viewBox}
               className="w-full"
-              style={{ maxHeight: "75vh" }}
+              style={{ maxHeight: "88vh" }}
               role="img"
               aria-label={`Chord diagram linking ${sourceBlocks.length} food categories to ${targetBlocks.length} functional feature classes.`}
             >
@@ -103,6 +141,7 @@ export function RibbonChord({ onSelectCategory }) {
                 that class within the category.
               </desc>
 
+              <g style={{ pointerEvents: dragging ? "none" : "auto" }}>
               {ribbons.map((ribbon, i) => {
                 const dimmed =
                   (activeCategory && activeCategory !== ribbon.sourceKey) ||
@@ -215,7 +254,9 @@ export function RibbonChord({ onSelectCategory }) {
                   </g>
                 );
               })}
+              </g>
             </svg>
+            </div>
 
             <div
               className="mt-2 pt-3 flex flex-wrap items-center justify-between gap-3"
@@ -237,7 +278,8 @@ export function RibbonChord({ onSelectCategory }) {
                 </>
               ) : (
                 <span className="text-xs" style={{ color: COLORS.inkSoft }}>
-                  Hover an arc to isolate its ribbons; click to keep the selection.
+                  Hover an arc to isolate its ribbons; click to keep the selection. Scroll
+                  to zoom, drag to pan.
                 </span>
               )}
             </div>

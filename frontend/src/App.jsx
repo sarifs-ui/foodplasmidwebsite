@@ -19,7 +19,10 @@ export default function App() {
         <Outlet />
       </main>
       <Footer />
-      <ScrollRestoration />
+      {/* Keyed by pathname, so changing a filter or sort on the same page
+          keeps the reader where they were instead of jumping to the top.
+          Navigating to a different page still starts at the top. */}
+      <ScrollRestoration getKey={(location) => location.pathname} />
     </div>
   );
 }

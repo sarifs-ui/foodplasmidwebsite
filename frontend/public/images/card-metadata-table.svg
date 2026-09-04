@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 200" width="900" height="200" role="img" aria-label="Illustration of the sample metadata table structure">
+  <!-- Representative illustration of the sample metadata table, using real
+       column names and record shapes from the dataset.
+
+       The content sits in the right-hand two-fifths on purpose: the card that
+       shows this image overlays a gradient and its title on the left, so
+       anything drawn there would be veiled and would collide with the heading. -->
+  <defs>
+    <linearGradient id="tableFadeRight" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#F6FAF9" stop-opacity="1" />
+      <stop offset="100%" stop-color="#F6FAF9" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="200" fill="#F6FAF9" />
+
+  <g font-family="'IBM Plex Mono', ui-monospace, Consolas, monospace">
+    <!-- Header -->
+    <rect x="360" y="30" width="560" height="30" fill="#006060" />
+    <g fill="#FFFFFF" font-size="13" font-weight="600">
+      <text x="376" y="50">Run_ID</text>
+      <text x="536" y="50">Category</text>
+      <text x="700" y="50">Year</text>
+      <text x="880" y="50" text-anchor="end">Contigs</text>
+    </g>
+
+    <!-- Rows -->
+    <g font-size="13">
+      <rect x="360" y="60" width="560" height="30" fill="#FFFFFF" />
+      <circle cx="544" cy="75" r="4.5" fill="#aec7e8" />
+      <text x="376" y="80" fill="#006060">SRR28523097</text>
+      <text x="558" y="80" fill="#3E5C5C">dairy</text>
+      <text x="700" y="80" fill="#3E5C5C">2024</text>
+      <text x="880" y="80" fill="#3E5C5C" text-anchor="end">9,270</text>
+
+      <rect x="360" y="90" width="560" height="30" fill="#EDF5F4" />
+      <circle cx="544" cy="105" r="4.5" fill="#c49c94" />
+      <text x="376" y="110" fill="#006060">SRR22865521</text>
+      <text x="558" y="110" fill="#3E5C5C">meat</text>
+      <text x="700" y="110" fill="#3E5C5C">2021</text>
+      <text x="880" y="110" fill="#3E5C5C" text-anchor="end">11,643</text>
+
+      <rect x="360" y="120" width="560" height="30" fill="#FFFFFF" />
+      <circle cx="544" cy="135" r="4.5" fill="#1f77b4" />
+      <text x="376" y="140" fill="#006060">DRR205701</text>
+      <text x="558" y="140" fill="#3E5C5C">alcohol</text>
+      <text x="700" y="140" fill="#3E5C5C">2017</text>
+      <text x="880" y="140" fill="#3E5C5C" text-anchor="end">1,105</text>
+
+      <!-- Fading row, so the table reads as an excerpt of something longer -->
+      <rect x="360" y="150" width="560" height="30" fill="#EDF5F4" />
+      <g opacity="0.4">
+        <circle cx="544" cy="165" r="4.5" fill="#bcbd22" />
+        <text x="376" y="170" fill="#006060">ERR13737143</text>
+        <text x="558" y="170" fill="#3E5C5C">water</text>
+        <text x="700" y="170" fill="#3E5C5C">2019</text>
+        <text x="880" y="170" fill="#3E5C5C" text-anchor="end">200</text>
+      </g>
+    </g>
+
+    <!-- Column rules -->
+    <g stroke="#CFE3E1" stroke-width="1">
+      <line x1="524" y1="60" x2="524" y2="180" />
+      <line x1="686" y1="60" x2="686" y2="180" />
+      <line x1="780" y1="60" x2="780" y2="180" />
+    </g>
+  </g>
+
+  <!-- Soften the left edge so the table dissolves before it reaches the title -->
+  <rect x="300" y="0" width="140" height="200" fill="url(#tableFadeRight)" />
+  <rect x="0" y="0" width="300" height="200" fill="#F6FAF9" />
+</svg>

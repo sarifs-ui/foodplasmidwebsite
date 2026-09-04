@@ -18,10 +18,12 @@ export function OverviewStats() {
     { label: "Countries", value: formatNumber(data.countries) },
     {
       label: "Source Databases",
-      // Trim the pipeline suffix ("cFMD-Logan" -> "cFMD") and de-duplicate.
-      value: Array.from(new Set((data.databaseOrigins || []).map((o) => o.split("-")[0]))).join(
-        " · "
-      ),
+      // Only the assembly-pipeline suffix is trimmed ("cFMD-Logan" and
+      // "cFMD-NotLogan" both become "cFMD"). Splitting on every hyphen would
+      // also truncate "In-House" to "In".
+      value: Array.from(
+        new Set((data.databaseOrigins || []).map((o) => o.replace(/-(Not)?Logan$/, "")))
+      ).join(" · "),
     },
     { label: "Total Plasmid Contigs", value: formatNumber(data.totalPlasmidContigs) },
   ];

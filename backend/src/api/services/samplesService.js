@@ -8,6 +8,49 @@ const MAX_PAGE_SIZE = 200;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_HITS = 200;
 
+/**
+ * Sortable columns, mapped to how each one is compared.
+ *
+ * Sorting is done server-side so it orders the whole result set, not just the
+ * 25 rows on the current page.
+ */
+const SORT_FIELDS = {
+  id: { get: (r) => r.run_id, type: "text" },
+  category: { get: (r) => r.category, type: "text" },
+  type: { get: (r) => r.type, type: "text" },
+  subtype: { get: (r) => r.sub_type, type: "text" },
+  country: { get: (r) => countryName(r.country), type: "text" },
+  // year_start keeps ranges like "2014/2015" in chronological order.
+  year: { get: (r) => r.year_start, type: "number" },
+  contigs: { get: (r) => r.plasmid_contig_counts, type: "number" },
+};
+
+/**
+ * Whether a request-supplied key names a real sortable column.
+ *
+ * Object.hasOwn, not `SORT_FIELDS[key]`: a plain object literal inherits from
+ * Object.prototype, so "__proto__", "constructor" and "toString" all return
+ * truthy values from a bare lookup and would be accepted as column names.
+ */
+function isSortable(key) {
+  return typeof key === "string" && Object.hasOwn(SORT_FIELDS, key);
+}
+
+/** Rows with no value sort last regardless of direction. */
+function compareBy(field, direction) {
+  const spec = SORT_FIELDS[field];
+  const sign = direction === "desc" ? -1 : 1;
+  return (a, b) => {
+    const va = spec.get(a);
+    const vb = spec.get(b);
+    const aEmpty = va === null || va === undefined || va === "";
+    const bEmpty = vb === null || vb === undefined || vb === "";
+    if (aEmpty || bEmpty) return aEmpty && bEmpty ? 0 : aEmpty ? 1 : -1;
+    if (spec.type === "number") return sign * (va - vb);
+    return sign * String(va).localeCompare(String(vb), "en");
+  };
+}
+
 function toArray(value) {
   if (value === undefined || value === null || value === "") return [];
   return Array.isArray(value) ? value : [value];
@@ -68,6 +111,13 @@ export function listSamples(query) {
     );
   }
 
+  const sort = isSortable(query.sort) ? query.sort : null;
+  const order = query.order === "desc" ? "desc" : "asc";
+  if (sort) {
+    // The store hands back a frozen array, so sort a copy.
+    data = [...data].sort(compareBy(sort, order));
+  }
+
   const total = data.length;
   const start = (page - 1) * pageSize;
 
@@ -75,6 +125,8 @@ export function listSamples(query) {
     total,
     page,
     pageSize,
+    sort,
+    order,
     results: data.slice(start, start + pageSize).map(toListRow),
   };
 }

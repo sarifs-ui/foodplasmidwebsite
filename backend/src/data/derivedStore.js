@@ -1,6 +1,15 @@
 import fs from "node:fs";
+import zlib from "node:zlib";
 
 import { DERIVED_PATH } from "../config/paths.js";
+
+/** The artifact is committed gzipped; an uncompressed file wins if present. */
+function resolvePath() {
+  if (fs.existsSync(DERIVED_PATH)) return { path: DERIVED_PATH, gzipped: false };
+  const gz = `${DERIVED_PATH}.gz`;
+  if (fs.existsSync(gz)) return { path: gz, gzipped: true };
+  return null;
+}
 
 /**
  * Loader for gfpr.derived.json — the committed artifact holding everything the
@@ -23,9 +32,11 @@ const EMPTY = Object.freeze({
 });
 
 function currentToken() {
+  const resolved = resolvePath();
+  if (!resolved) return "missing";
   try {
-    const stat = fs.statSync(DERIVED_PATH);
-    return `${stat.mtimeMs}:${stat.size}`;
+    const stat = fs.statSync(resolved.path);
+    return `${resolved.path}:${stat.mtimeMs}:${stat.size}`;
   } catch {
     return "missing";
   }
@@ -41,11 +52,13 @@ export function loadDerived() {
     return cache;
   }
 
+  const resolved = resolvePath();
   try {
-    const parsed = JSON.parse(fs.readFileSync(DERIVED_PATH, "utf-8"));
-    cache = Object.freeze({ ...EMPTY, ...parsed });
+    const raw = fs.readFileSync(resolved.path);
+    const text = resolved.gzipped ? zlib.gunzipSync(raw) : raw;
+    cache = Object.freeze({ ...EMPTY, ...JSON.parse(text.toString("utf-8")) });
   } catch (err) {
-    console.warn(`[derived] Could not read ${DERIVED_PATH}: ${err.message}`);
+    console.warn(`[derived] Could not read ${resolved.path}: ${err.message}`);
     cache = EMPTY;
   }
   cacheToken = token;

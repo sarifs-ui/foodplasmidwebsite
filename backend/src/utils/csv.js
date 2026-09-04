@@ -4,7 +4,7 @@
  * The exported data is simple enough that a dependency is not warranted; this
  * only needs to quote the three characters that would otherwise break a field.
  */
-function escapeValue(value) {
+export function escapeCsvValue(value) {
   if (value === null || value === undefined) return "";
   const text = String(value);
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
@@ -18,9 +18,9 @@ function escapeValue(value) {
 export function rowsToCsv(rows) {
   if (!rows || rows.length === 0) return "";
   const headers = Object.keys(rows[0]);
-  const lines = [headers.map(escapeValue).join(",")];
+  const lines = [headers.map(escapeCsvValue).join(",")];
   for (const row of rows) {
-    lines.push(headers.map((h) => escapeValue(row[h])).join(","));
+    lines.push(headers.map((h) => escapeCsvValue(row[h])).join(","));
   }
   return lines.join("\n");
 }
