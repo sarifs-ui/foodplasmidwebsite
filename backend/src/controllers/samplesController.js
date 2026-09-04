@@ -164,6 +164,44 @@ function getAnnotationsFromDb(runId) {
   });
 }
 
+function resolveHost(runId, existingHost) {
+  if (existingHost) return existingHost;
+  if (!tableExists("host_taxonomy") || !runId) return null;
+  try {
+    const speciesRows = db
+      .prepare(
+        `SELECT species, COUNT(*) as cnt FROM host_taxonomy 
+         WHERE run_id = ? AND species IS NOT NULL AND species != 'Unclassified' AND species != '-' 
+         GROUP BY species ORDER BY cnt DESC LIMIT 3`
+      )
+      .all(runId);
+    if (speciesRows.length > 0) {
+      return speciesRows.map((r) => r.species).join(", ");
+    }
+    const genusRows = db
+      .prepare(
+        `SELECT genus, COUNT(*) as cnt FROM host_taxonomy 
+         WHERE run_id = ? AND genus IS NOT NULL AND genus != 'Unclassified' AND genus != '-' 
+         GROUP BY genus ORDER BY cnt DESC LIMIT 3`
+      )
+      .all(runId);
+    if (genusRows.length > 0) {
+      return genusRows.map((r) => r.genus).join(", ");
+    }
+    const taxRow = db
+      .prepare(
+        `SELECT family, class, phylum FROM host_taxonomy 
+         WHERE run_id = ? AND (family IS NOT NULL OR class IS NOT NULL OR phylum IS NOT NULL) 
+         LIMIT 1`
+      )
+      .get(runId);
+    if (taxRow) {
+      return taxRow.family || taxRow.class || taxRow.phylum || null;
+    }
+  } catch {}
+  return null;
+}
+
 // GET /api/samples/:id
 // Annotation hit'leri artık SQLite gfpr.db'den run_id ile çekiliyor.
 export function getSampleById(req, res) {
@@ -172,23 +210,7 @@ export function getSampleById(req, res) {
 
   // run_id ile SQLite'tan gerçek anotasyonları çek
   const annotations = getAnnotationsFromDb(row.run_id);
-
-  // host bilgisi boşsa host_taxonomy tablosundan tamamlamayı dene
-  let host = row.host;
-  if (!host && tableExists("host_taxonomy")) {
-    try {
-      const taxRow = db
-        .prepare(
-          `SELECT species, genus, family FROM host_taxonomy 
-           WHERE run_id = ? AND species IS NOT NULL AND species != 'Unclassified' 
-           LIMIT 1`
-        )
-        .get(row.run_id);
-      if (taxRow) {
-        host = taxRow.species || taxRow.genus || taxRow.family;
-      }
-    } catch {}
-  }
+  const host = resolveHost(row.run_id, row.host);
 
   res.json({
     id: row.sample_id,

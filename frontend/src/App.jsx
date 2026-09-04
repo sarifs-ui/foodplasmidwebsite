@@ -1793,20 +1793,22 @@ function CgcGeneDiagram({ genes }) {
         const availableWidth = svgWidth - paddingX * 2;
 
         return (
-          <div key={clusterName} className="p-3.5 rounded-xl border" style={{ backgroundColor: COLORS.paperAlt, borderColor: COLORS.line }}>
-            <div className="flex items-center justify-between text-xs font-semibold mb-2" style={{ color: COLORS.darkTeal, fontFamily: FONT_MONO }}>
-              <span>{clusterName}</span>
+          <div key={clusterName} className="p-4 rounded-xl border space-y-3" style={{ backgroundColor: "#fafcfc", borderColor: COLORS.line }}>
+            <div className="flex items-center justify-between text-xs font-semibold" style={{ color: COLORS.darkTeal, fontFamily: FONT_MONO }}>
+              <span className="bg-teal-50 text-teal-800 px-2 py-0.5 rounded border border-teal-200">{clusterName}</span>
               <span className="text-[11px] font-normal" style={{ color: COLORS.inkSoft }}>
-                {minBp.toLocaleString()} bp – {maxBp.toLocaleString()} bp (span: {span.toLocaleString()} bp)
+                Span: {minBp.toLocaleString()} bp – {maxBp.toLocaleString()} bp ({span.toLocaleString()} bp total)
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <svg viewBox={`0 0 ${svgWidth} ${clusterGenes.length * rowHeight + 30}`} className="w-full text-xs" style={{ minWidth: 440, height: "auto" }}>
+            <div className="overflow-x-auto bg-white p-3 rounded-lg border" style={{ borderColor: COLORS.line }}>
+              <svg viewBox={`0 0 ${svgWidth} ${clusterGenes.length * rowHeight + 28}`} className="w-full text-xs" style={{ minWidth: 440, height: "auto" }}>
                 {/* Coordinate Backbone */}
-                <line x1={paddingX} y1={18} x2={svgWidth - paddingX} y2={18} stroke={COLORS.line} strokeWidth={2} strokeDasharray="3 3" />
-                <text x={paddingX} y={11} fill={COLORS.inkSoft} fontSize={9.5} textAnchor="start" fontFamily={FONT_MONO}>{minBp} bp</text>
-                <text x={svgWidth - paddingX} y={11} fill={COLORS.inkSoft} fontSize={9.5} textAnchor="end" fontFamily={FONT_MONO}>{maxBp} bp</text>
+                <line x1={paddingX} y1={16} x2={svgWidth - paddingX} y2={16} stroke={COLORS.line} strokeWidth={2} strokeDasharray="4 4" />
+                <circle cx={paddingX} cy={16} r={3} fill={COLORS.medTeal} />
+                <circle cx={svgWidth - paddingX} cy={16} r={3} fill={COLORS.medTeal} />
+                <text x={paddingX} y={10} fill={COLORS.inkSoft} fontSize={9} textAnchor="start" fontFamily={FONT_MONO}>{minBp} bp</text>
+                <text x={svgWidth - paddingX} y={10} fill={COLORS.inkSoft} fontSize={9} textAnchor="end" fontFamily={FONT_MONO}>{maxBp} bp</text>
 
                 {/* Gene Arrows */}
                 {clusterGenes.map((g, idx) => {
@@ -1814,8 +1816,8 @@ function CgcGeneDiagram({ genes }) {
                   const gStop = g.gene_stop ?? maxBp;
                   const x1 = paddingX + ((Math.min(gStart, gStop) - minBp) / span) * availableWidth;
                   const x2 = paddingX + ((Math.max(gStart, gStop) - minBp) / span) * availableWidth;
-                  const width = Math.max(x2 - x1, 26);
-                  const y = 28 + idx * rowHeight;
+                  const width = Math.max(x2 - x1, 28);
+                  const y = 26 + idx * rowHeight;
                   const height = 18;
                   const isReverse = g.gene_strand === "-";
                   const color = getGeneColor(g);
@@ -1831,11 +1833,13 @@ function CgcGeneDiagram({ genes }) {
 
                   return (
                     <g key={idx} className="group cursor-pointer">
-                      <title>{`${label}\nCoordinates: ${gStart} - ${gStop} bp (${g.gene_strand || "+"})\nType: ${g.gene_type || "-"}\nSubstrate: ${g.substrate || "-"}`}</title>
-                      <path d={path} fill={color} stroke="#fff" strokeWidth={1.5} className="transition-opacity hover:opacity-85" />
+                      <title>{`${label}\nCoordinates: ${gStart} - ${gStop} bp (${g.gene_strand || "+"})\nGene Type: ${g.gene_type || "-"}\nAnnotation: ${g.gene_annotation || "-"}\nSubstrate: ${g.substrate || "-"}`}</title>
+                      <path d={path} fill={color} stroke="#fff" strokeWidth={1.5} className="transition-opacity hover:opacity-80" />
+                      {/* Start and stop coordinates text */}
                       <text x={isReverse ? x2 + 5 : x1 - 5} y={y + height / 2 + 3} fill={COLORS.inkSoft} fontSize={8.5} textAnchor={isReverse ? "start" : "end"} fontFamily={FONT_MONO}>
                         {gStart}..{gStop}
                       </text>
+                      {/* Label on arrow */}
                       <text x={x1 + width / 2} y={y + height / 2 + 3.5} fill="#fff" fontSize={9} fontWeight={600} textAnchor="middle" className="pointer-events-none">
                         {label.length > 18 ? label.slice(0, 16) + "…" : label}
                       </text>
@@ -1844,12 +1848,41 @@ function CgcGeneDiagram({ genes }) {
                 })}
               </svg>
             </div>
+
+            {/* Gene Table */}
+            <div className="overflow-x-auto text-[11px]">
+              <table className="w-full text-left" style={{ fontFamily: FONT_BODY }}>
+                <thead>
+                  <tr className="text-gray-500 border-b" style={{ borderColor: COLORS.line }}>
+                    <th className="py-1 font-semibold">Gene / Annotation</th>
+                    <th className="py-1 font-semibold">Type</th>
+                    <th className="py-1 font-semibold">Strand</th>
+                    <th className="py-1 font-semibold" style={{ fontFamily: FONT_MONO }}>Start – Stop</th>
+                    <th className="py-1 font-semibold">Substrate / Result</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {clusterGenes.map((g, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="py-1 flex items-center gap-1.5 font-medium" style={{ color: COLORS.ink }}>
+                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: getGeneColor(g) }} />
+                        <span className="truncate max-w-[200px]" title={g.gene_annotation || ""}>{g.gene_annotation || g.gene_type || "—"}</span>
+                      </td>
+                      <td className="py-1 text-gray-600">{g.category || g.gene_type || "—"}</td>
+                      <td className="py-1 text-gray-600 font-mono">{g.gene_strand || "+"}</td>
+                      <td className="py-1 font-mono text-gray-600">{g.gene_start ?? "—"} – {g.gene_stop ?? "—"} bp</td>
+                      <td className="py-1 text-gray-600 truncate max-w-[150px]" title={g.substrate || g.recommend_results || ""}>{g.substrate || g.recommend_results || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         );
       })}
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-3 pt-1 border-t" style={{ borderColor: COLORS.paperAlt }}>
+      <div className="flex flex-wrap items-center gap-3 pt-2 border-t" style={{ borderColor: COLORS.paperAlt }}>
         <span className="text-[11px] font-semibold" style={{ color: COLORS.inkSoft }}>Gene Legend:</span>
         {legendItems.map((item) => (
           <div key={item.label} className="flex items-center gap-1.5 text-xs">
@@ -1949,7 +1982,7 @@ function SampleDetailPage({ recordId, onBack, onMockAction }) {
                 <InfoRow label="Country">{record.country}</InfoRow>
                 <InfoRow label="Category">{catLabel(record.category)} → {record.type} → {record.subtype}</InfoRow>
                 <InfoRow label="Fermented">{record.fermented ? "Yes" : "No"}</InfoRow>
-                <InfoRow label="Host"><em>{record.host}</em></InfoRow>
+                <InfoRow label="Host">{record.host ? <em>{record.host}</em> : <span style={{ color: COLORS.inkSoft }}>—</span>}</InfoRow>
                 <InfoRow label="Plasmid Contig Count">{record.plasmidContigCounts}</InfoRow>
                 <InfoRow label="Date">{record.year}</InfoRow>
               </div>
