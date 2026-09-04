@@ -20,6 +20,9 @@ const BORDER = "#FFFFFF";
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 8;
 
+/** Pointer travel, in CSS pixels, still counted as a click and not a pan. */
+const CLICK_SLOP = 5;
+
 /**
  * Sequential teal ramp, light to dark, built on the project's #006060 base so
  * the map sits in the same colour family as the rest of the site.
@@ -71,6 +74,8 @@ export function WorldMap({ onSelectCountry }) {
   const [hovered, setHovered] = useState(null);
   const [locked, setLocked] = useState(null);
   const containerRef = useRef(null);
+  // Where the current press started, so a press can be told from a pan.
+  const pressRef = useRef(null);
 
   const valueField = mode === "contigs" ? "contigs" : "count";
 
@@ -113,6 +118,28 @@ export function WorldMap({ onSelectCountry }) {
   }, []);
 
   const active = hovered || locked;
+
+  /**
+   * Selection runs on pointerup rather than click.
+   *
+   * The map's pan gesture is d3-zoom's, and d3 kills the click that ends a
+   * gesture it considered a drag — three pixels of movement was enough, so a
+   * normal click on a country usually left the readout empty and the figure
+   * looked as if only hover worked. Pointer events are untouched by d3-zoom,
+   * so the press is measured here instead and anything under the threshold
+   * counts as a click on that country.
+   */
+  const onCountryPointerDown = useCallback((event, row) => {
+    pressRef.current = row ? { x: event.clientX, y: event.clientY, code: row.code } : null;
+  }, []);
+
+  const onCountryPointerUp = useCallback((event, row) => {
+    const press = pressRef.current;
+    pressRef.current = null;
+    if (!row || !press || press.code !== row.code) return;
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_SLOP) return;
+    setLocked((prev) => (prev?.code === row.code ? null : row));
+  }, []);
 
   return (
     <FigureFrame
@@ -206,7 +233,8 @@ export function WorldMap({ onSelectCountry }) {
                           onMouseLeave={() => setHovered(null)}
                           onFocus={() => row && setHovered(row)}
                           onBlur={() => setHovered(null)}
-                          onClick={() => row && setLocked(locked?.code === row.code ? null : row)}
+                          onPointerDown={(event) => onCountryPointerDown(event, row)}
+                          onPointerUp={(event) => onCountryPointerUp(event, row)}
                           onKeyDown={(event) => {
                             if (row && (event.key === "Enter" || event.key === " ")) {
                               event.preventDefault();
@@ -241,7 +269,7 @@ export function WorldMap({ onSelectCountry }) {
               />
               <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>
                 {maxValue.toLocaleString("en-US")}
-                {mode === "contigs" ? " contigs" : " samples"}
+                {mode === "contigs" ? " plasmid contigs" : " samples"}
               </span>
             </div>
           )}
@@ -261,7 +289,7 @@ export function WorldMap({ onSelectCountry }) {
                     style={{ color: COLORS.inkSoft, fontFamily: FONT_MONO }}
                   >
                     {active.count.toLocaleString("en-US")} samples ·{" "}
-                    {active.contigs.toLocaleString("en-US")} contigs
+                    {active.contigs.toLocaleString("en-US")} plasmid contigs
                   </span>
                   {active.category && (
                     <span
