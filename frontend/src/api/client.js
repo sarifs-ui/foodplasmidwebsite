@@ -16,7 +16,7 @@ export class ApiError extends Error {
     this.path = path;
   }
 }
-
+ 
 function buildUrl(path, params) {
   // A relative path still needs an absolute base for the URL constructor.
   const url = new URL(API_BASE + path, window.location.origin);
