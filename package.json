@@ -11,7 +11,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "postinstall": "npm run import-data",
+    "postinstall": "npm run import-data && npm run import-annotations",
     "import-data": "npm run import-data --workspace backend",
     "import-annotations": "npm run import-annotations --workspace backend",
     "build": "npm run build --workspace frontend",

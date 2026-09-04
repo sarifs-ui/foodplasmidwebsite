@@ -22,7 +22,7 @@ COPY . .
 
 # Build the UI and the sample table. The derived artifact (figure payloads) is
 # committed, so no heavy source file is needed here.
-RUN npm run build && npm run import-data
+RUN npm run build && npm run import-data && npm run import-annotations
 
 # Drop dev dependencies (vite, oxlint, concurrently).
 RUN npm prune --omit=dev

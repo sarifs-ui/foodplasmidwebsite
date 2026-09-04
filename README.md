@@ -55,8 +55,9 @@ http://localhost:4000
   └── /*       → React app
 ```
 
-`npm install` (and the Docker build) imports the bundled sample table
-automatically, which is why the site has data on first launch.
+`npm install` (and the Docker build) imports the bundled tables automatically —
+the sample table plus the five annotation tables — which is why the site has
+data on first launch.
 
 ## Commands
 
@@ -88,8 +89,8 @@ automatically, which is why the site has data on first launch.
 
 Two source files are too large to distribute here (`family_assigned.csv`,
 69 MB; `merged_pfam_kofam.csv`, 319 MB). Without them everything works except
-the per-sample gene hit lists on the sample detail page. To add them, place
-both in `backend/data/` and run:
+the host-taxonomy rows and the per-sample Pfam/KO term lists. To add them,
+place both in `backend/data/` and run:
 
 ```bash
 npm run import-annotations   # builds backend/data/gfpr.db (~500 MB)
