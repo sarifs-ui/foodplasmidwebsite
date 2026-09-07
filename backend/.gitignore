@@ -1,16 +1,13 @@
 node_modules/
 .env
-
-# Only the small, gzipped source tables and the derived artifact belong in the
-# repository (~730 KB in total). Everything else in data/ — the two
-# multi-hundred-megabyte source files, the generated SQLite database and the
-# generated sample table — stays out.
 data/*
-!data/metadata.csv.gz
-!data/chord.csv.gz
-!data/amr-rgi-consensus.csv.gz
-!data/cazyme.csv.gz
-!data/amp_all.csv.gz
-!data/cctyper.csv.gz
-!data/acp_all.csv.gz
-!data/gfpr.derived.json.gz
+!data/metadata.csv.zst
+!data/chord.csv.zst
+!data/amr-rgi-consensus.csv.zst
+!data/cazyme.csv.zst
+!data/amp_all.csv.zst
+!data/cctyper.csv.zst
+!data/acp_all.csv.zst
+!data/gfpr.derived.json.zst
+!data/family_assigned.csv.zst
+!data/merged_pfam_kofam.csv.zst

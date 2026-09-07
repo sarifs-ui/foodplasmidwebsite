@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import { dataFile } from "../../config/paths.js";
+import { resolveCompressed } from "./codec.js";
 
 /**
  * Declarative description of every source file.
@@ -57,6 +58,10 @@ export const DATASETS = {
     file: "family_assigned.csv",
     delimiter: ",",
     heavy: true,
+    // Column holding the run id in the source file. The export reads these two
+    // files directly when their tables are not in the database, and needs to
+    // know which column to filter on.
+    runIdColumn: "RunID",
     description:
       "Contig-level host taxonomy. Pre-filtered to family-assigned contigs, so " +
       "it is NOT a complete census of a run's contigs — see buildDerived.js.",
@@ -66,6 +71,7 @@ export const DATASETS = {
     delimiter: ",",
     heavy: true,
     stream: true,
+    runIdColumn: "id",
     description:
       "Pfam/KOfam terms per contig (~5.5M rows). Quoted, comma-containing " +
       "fields mean this must go through a real CSV parser, never a line split.",
@@ -75,18 +81,21 @@ export const DATASETS = {
 /**
  * Locate a dataset on disk.
  *
- * The committed sources are stored gzipped (12 MB of CSV compresses to about
- * 0.7 MB, which keeps the repository small). A plain, uncompressed file takes
- * precedence if present, so a contributor can drop one in without renaming.
+ * The committed sources are stored compressed — zstd for anything written now,
+ * though .br and .gz are still recognised so a checkout part-way through the
+ * migration keeps working. A plain, uncompressed file takes precedence, so a
+ * contributor can drop one in without renaming.
+ *
+ * The codec travels with the path: nothing downstream has to know which format
+ * a file is in, and no file is ever expanded onto disk.
  */
 export function resolveDatasetPath(key) {
   const spec = DATASETS[key];
   if (!spec) throw new Error(`Unknown dataset: ${key}`);
   const plain = dataFile(spec.file);
-  if (fs.existsSync(plain)) return { path: plain, gzipped: false };
-  const gz = dataFile(`${spec.file}.gz`);
-  if (fs.existsSync(gz)) return { path: gz, gzipped: true };
-  return { path: plain, gzipped: false, missing: true };
+  const found = resolveCompressed(plain, (p) => fs.existsSync(p));
+  if (found) return found;
+  return { path: plain, codec: null, missing: true };
 }
 
 export function datasetPath(key) {

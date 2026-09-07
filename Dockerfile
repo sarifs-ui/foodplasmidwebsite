@@ -20,9 +20,15 @@ RUN npm ci --ignore-scripts
 
 COPY . .
 
-# Build the UI and the sample table. The derived artifact (figure payloads) is
-# committed, so no heavy source file is needed here.
-RUN npm run build && npm run import-data && npm run import-annotations
+# Build the UI and the sample table, then the light annotation tables only.
+#
+# --light skips host_taxonomy and pfam_ko: as SQLite tables they cost ~520 MB,
+# and nothing in the image needs them. The sample page reads Pfam/KO terms from
+# the committed derived artifact, and their exports stream straight out of the
+# committed .zst sources, which stay in backend/data for the runtime stage.
+RUN npm run build \
+ && npm run import-data \
+ && npm run import-annotations --workspace backend -- --light
 
 # Drop dev dependencies (vite, oxlint, concurrently).
 RUN npm prune --omit=dev

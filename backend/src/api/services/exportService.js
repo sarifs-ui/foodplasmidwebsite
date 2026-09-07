@@ -1,10 +1,33 @@
+import fs from "node:fs";
 import { deflateRawSync } from "node:zlib";
 import { Readable } from "node:stream";
 
 import { EXPORT_ANNOTATION_KEYS, annotationByKey } from "../../config/annotations.js";
 import { db, tableExists } from "../../data/annotationsDb.js";
+import { loadDerived } from "../../data/derivedStore.js";
 import { readAll } from "../../data/sampleStore.js";
+import { decompressedStream, streamRows } from "../../ingest/lib/csvSource.js";
+import { DATASETS, resolveDatasetPath } from "../../ingest/lib/datasets.js";
 import { escapeCsvValue, rowsToCsv } from "../../utils/csv.js";
+
+/**
+ * Annotation keys whose table is too large to keep in the shipped database.
+ *
+ * They are served straight from the compressed source file instead: the image
+ * carries merged_pfam_kofam.csv.zst (~30 MB) rather than the 432 MB the table
+ * and its index would occupy in SQLite. The database is still preferred when
+ * it does hold the table, so a full local build behaves exactly as before.
+ */
+const FILE_BACKED = {
+  host_taxonomy: "hostTaxonomy",
+  pfam_ko: "pfamKo",
+};
+
+function fileBackedDataset(key) {
+  const dataset = FILE_BACKED[key];
+  if (!dataset) return null;
+  return resolveDatasetPath(dataset).missing ? null : dataset;
+}
 
 /**
  * SQLite caps the number of bound parameters per statement, so long id lists
@@ -33,7 +56,13 @@ export const MAX_ROWS_PER_TABLE =
 /** Ceiling on how many samples one export may cover. */
 export const MAX_RUN_IDS = 5_000;
 
-const METADATA_COLUMNS = [
+/**
+ * Every metadata field an export may contain, in the order they are written.
+ *
+ * This doubles as the allow-list for the client's column selection: a request
+ * naming anything else is intersected away rather than reaching the record.
+ */
+export const METADATA_COLUMNS = [
   "run_id",
   "project_id",
   "biosample_id",
@@ -65,12 +94,49 @@ export function isExportableKey(key) {
   return EXPORT_ANNOTATION_KEYS.includes(key);
 }
 
+/**
+ * Whether this deployment can produce the table at all — from the database or
+ * from a source file. Separate from the row count, which is legitimately
+ * unknown for a filtered file-backed export.
+ */
+export function isAnnotationAvailable(key) {
+  const table = resolveTableName(key);
+  if (table && tableExists(table)) return true;
+  return fileBackedDataset(key) !== null;
+}
+
+/**
+ * True when the table will be served from its source file rather than the
+ * database — which means its CSV carries the source file's column names.
+ */
+export function isFileBacked(key) {
+  const table = resolveTableName(key);
+  if (table && tableExists(table)) return false;
+  return fileBackedDataset(key) !== null;
+}
+
+/**
+ * Which columns an export writes.
+ *
+ * `requested` of null (or an empty list) means all of them, so a caller that
+ * knows nothing about columns keeps the previous behaviour. run_id is always
+ * included and always first: a metadata file whose rows cannot be traced back
+ * to a sample is of no use to anyone.
+ */
+export function resolveMetadataColumns(requested) {
+  if (!Array.isArray(requested) || requested.length === 0) return METADATA_COLUMNS;
+  const wanted = new Set(requested);
+  const columns = METADATA_COLUMNS.filter((c) => c !== "run_id" && wanted.has(c));
+  return ["run_id", ...columns];
+}
+
 /** `runIds` of null means every sample, throughout this module. */
-export function buildMetadataCsv(runIds) {
+export function buildMetadataCsv(runIds, requestedColumns) {
+  const columns = resolveMetadataColumns(requestedColumns);
   const idSet = runIds ? new Set(runIds) : null;
   const rows = readAll()
     .filter((r) => !idSet || idSet.has(r.run_id))
-    .map((r) => Object.fromEntries(METADATA_COLUMNS.map((c) => [c, r[c]])));
+    .map((r) => Object.fromEntries(columns.map((c) => [c, r[c]])));
   return rowsToCsv(rows);
 }
 
@@ -102,6 +168,55 @@ function csvLine(headers, row) {
 }
 
 /**
+ * Stream a heavy table straight from its compressed source file.
+ *
+ * Two paths, because they cost wildly different amounts:
+ *
+ *   - Whole catalogue: the decompressed bytes go to the archive untouched. No
+ *     CSV parsing at all, which on a 5.5M-row file is the difference between
+ *     seconds and minutes.
+ *   - A selection: the rows are parsed as a stream and filtered on the source
+ *     file's own run-id column, then written back out.
+ *
+ * Either way the output carries the source file's column names rather than the
+ * database's, and nothing is ever expanded onto disk.
+ */
+function streamSourceCsv(dataset, runIds, maxRows) {
+  if (!runIds) return decompressedStream(dataset);
+
+  const { runIdColumn, delimiter } = DATASETS[dataset];
+  const idSet = new Set(runIds);
+
+  async function* generate() {
+    let headers = null;
+    let written = 0;
+    let block = [];
+
+    for await (const row of streamRows(dataset)) {
+      if (!idSet.has(row[runIdColumn])) continue;
+      if (!headers) {
+        headers = Object.keys(row);
+        block.push(headers.map(escapeCsvValue).join(delimiter));
+      }
+      block.push(headers.map((h) => escapeCsvValue(row[h])).join(delimiter));
+      written += 1;
+      if (written >= maxRows) {
+        block.push(`# truncated at ${maxRows} rows`);
+        break;
+      }
+      if (block.length >= ROWS_PER_BLOCK) {
+        yield `${block.join("\n")}\n`;
+        block = [];
+      }
+    }
+
+    if (block.length > 0) yield `${block.join("\n")}\n`;
+  }
+
+  return Readable.from(generate());
+}
+
+/**
  * Stream one annotation table as CSV for the given runs.
  *
  * Rows are pulled with SQLite's row-at-a-time iterator and serialised straight
@@ -115,7 +230,10 @@ function csvLine(headers, row) {
  */
 export function streamAnnotationCsv(key, runIds, { maxRows = MAX_ROWS_PER_TABLE } = {}) {
   const table = resolveTableName(key);
-  if (!table || !tableExists(table)) return null;
+  if (!table || !tableExists(table)) {
+    const dataset = fileBackedDataset(key);
+    return dataset ? streamSourceCsv(dataset, runIds, maxRows) : null;
+  }
 
   async function* generate() {
     let headers = null;
@@ -185,7 +303,19 @@ function compressionRatio(text) {
  */
 export function estimateAnnotationBytes(key, runIds, rows) {
   const table = resolveTableName(key);
-  if (!table || !tableExists(table) || !rows) return 0;
+  if (!table || !tableExists(table)) {
+    const dataset = fileBackedDataset(key);
+    if (!dataset) return 0;
+    // No sampling here: reading a 5.5M-row file to guess its own size would
+    // cost more than the guess is worth. The stored file is zstd (~0.09 of the
+    // CSV) and the archive re-compresses with deflate (~0.17), so the entry
+    // lands near twice the file on disk. Scaled by the share of runs asked
+    // for, since the estimate only drives a progress percentage.
+    const onDisk = fs.statSync(resolveDatasetPath(dataset).path).size;
+    const share = runIds ? Math.min(1, runIds.length / Math.max(1, readAll().length)) : 1;
+    return Math.round(onDisk * 2 * share);
+  }
+  if (!rows) return 0;
 
   const lines = [];
   let headers = null;
@@ -219,7 +349,17 @@ export function estimateArchiveBytes({ metadataCsv, tables, runIds }) {
 /** Total rows a table holds, for the manifest. */
 export function countAnnotationRows(key, runIds) {
   const table = resolveTableName(key);
-  if (!table || !tableExists(table)) return null;
+  if (!table || !tableExists(table)) {
+    const dataset = fileBackedDataset(key);
+    if (!dataset) return null;
+    // The import recorded every source file's row count into the derived
+    // artifact, so the whole-catalogue total is already known. A selection
+    // would need a full scan to count exactly, and the manifest is written
+    // before the rows are streamed — so that case reports null ("unknown")
+    // rather than paying for a scan or inventing a number.
+    if (runIds) return null;
+    return loadDerived().sources[DATASETS[dataset].file]?.rows ?? null;
+  }
   if (!runIds) return db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
   let total = 0;
   for (const ids of chunk(runIds, CHUNK_SIZE)) {

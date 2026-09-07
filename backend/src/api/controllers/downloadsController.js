@@ -3,11 +3,15 @@ import archiver from "archiver";
 import {
   MAX_ROWS_PER_TABLE,
   MAX_RUN_IDS,
+  METADATA_COLUMNS,
   buildMetadataCsv,
   countAnnotationRows,
   countSamples,
   estimateArchiveBytes,
+  isAnnotationAvailable,
   isExportableKey,
+  isFileBacked,
+  resolveMetadataColumns,
   streamAnnotationCsv,
 } from "../services/exportService.js";
 
@@ -17,7 +21,7 @@ import {
  * Written first, so anyone opening the zip can see the row count behind every
  * file — and, if a table ever hits the row ceiling, that it did.
  */
-function buildManifest({ runIds, wantMetadata, tables, sampleCount }) {
+function buildManifest({ runIds, wantMetadata, metadataColumns, tables, sampleCount }) {
   const rowCount = (n) => `${n} row${n === 1 ? "" : "s"}`;
   const lines = [
     "GFPR export",
@@ -26,16 +30,30 @@ function buildManifest({ runIds, wantMetadata, tables, sampleCount }) {
     "",
     "Files:",
   ];
-  if (wantMetadata) lines.push(`  metadata.csv — ${rowCount(sampleCount)}`);
-  for (const { key, rows } of tables) {
-    if (rows === null) {
+  if (wantMetadata) {
+    lines.push(
+      `  metadata.csv — ${rowCount(sampleCount)}, ` +
+        `${metadataColumns.length} of ${METADATA_COLUMNS.length} columns ` +
+        `(${metadataColumns.join(", ")})`
+    );
+  }
+  for (const { key, rows, available, fromSource } of tables) {
+    // Served from the source file, so the header row is the source's own
+    // column names (RunID, Contig, …) rather than the database's.
+    const origin = fromSource ? " [source column names]" : "";
+    if (!available) {
       lines.push(`  annotations/${key}.csv — NOT AVAILABLE in this deployment`);
+    } else if (rows === null) {
+      // Streamed from the compressed source file for a subset of samples: the
+      // count is only known once the rows have been written, and this manifest
+      // goes into the archive first.
+      lines.push(`  annotations/${key}.csv — rows for the selected samples${origin}`);
     } else if (rows > MAX_ROWS_PER_TABLE) {
       lines.push(
-        `  annotations/${key}.csv — ${MAX_ROWS_PER_TABLE} of ${rows} rows (TRUNCATED at the per-table ceiling)`
+        `  annotations/${key}.csv — ${MAX_ROWS_PER_TABLE} of ${rows} rows (TRUNCATED at the per-table ceiling)${origin}`
       );
     } else {
-      lines.push(`  annotations/${key}.csv — ${rowCount(rows)}`);
+      lines.push(`  annotations/${key}.csv — ${rowCount(rows)}${origin}`);
     }
   }
   return `${lines.join("\n")}\n`;
@@ -43,10 +61,21 @@ function buildManifest({ runIds, wantMetadata, tables, sampleCount }) {
 
 /**
  * POST /api/downloads/export
- * Body: { runIds: string[], include: { metadata: boolean, annotations: string[] } }
+ * Body: {
+ *   runIds: string[],
+ *   include: {
+ *     metadata: boolean,
+ *     metadataColumns?: string[],
+ *     annotations: string[]
+ *   }
+ * }
  *
  * An empty `runIds` means "everything". The client is expected to send the ids
  * it actually wants; it is not inferred from any server-side filter state.
+ *
+ * `metadataColumns` mirrors the columns the browser is showing. Omitting it
+ * means every column, so an older client — or curl — still gets the whole
+ * table.
  */
 export async function exportArchive(req, res) {
   const rawIds = Array.isArray(req.body?.runIds)
@@ -65,6 +94,9 @@ export async function exportArchive(req, res) {
   }
 
   const wantMetadata = req.body?.include?.metadata !== false;
+  // Filtered against METADATA_COLUMNS inside resolveMetadataColumns, so an
+  // unknown or hostile field name cannot reach the record.
+  const metadataColumns = resolveMetadataColumns(req.body?.include?.metadataColumns);
   const requestedAnnotations = Array.isArray(req.body?.include?.annotations)
     ? req.body.include.annotations.filter(isExportableKey)
     : [];
@@ -85,8 +117,10 @@ export async function exportArchive(req, res) {
   const tables = requestedAnnotations.map((key) => ({
     key,
     rows: countAnnotationRows(key, runIds),
+    available: isAnnotationAvailable(key),
+    fromSource: isFileBacked(key),
   }));
-  const metadataCsv = wantMetadata ? buildMetadataCsv(runIds) : null;
+  const metadataCsv = wantMetadata ? buildMetadataCsv(runIds, metadataColumns) : null;
 
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", 'attachment; filename="gfpr-export.zip"');
@@ -109,9 +143,10 @@ export async function exportArchive(req, res) {
   });
   archive.pipe(res);
 
-  archive.append(buildManifest({ runIds, wantMetadata, tables, sampleCount }), {
-    name: "MANIFEST.txt",
-  });
+  archive.append(
+    buildManifest({ runIds, wantMetadata, metadataColumns, tables, sampleCount }),
+    { name: "MANIFEST.txt" }
+  );
 
   if (metadataCsv !== null) {
     archive.append(metadataCsv, { name: "metadata.csv" });

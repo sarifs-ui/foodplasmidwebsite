@@ -71,34 +71,56 @@ data on first launch.
 
 ## Data
 
-`backend/data/` holds the dataset as gzipped tables (~730 KB in total):
+`backend/data/` holds the dataset as zstd-compressed tables:
 
 | File | Contents |
 |---|---|
-| `metadata.csv.gz` | 4,690 samples — the master table |
-| `chord.csv.gz` | Category × feature-class matrix |
-| `amr-rgi-consensus.csv.gz` | Resistance gene calls |
-| `cazyme.csv.gz` | Carbohydrate-active enzymes |
-| `amp_all.csv.gz`, `acp_all.csv.gz` | Peptide predictions |
-| `cctyper.csv.gz` | CRISPR-Cas systems |
-| `gfpr.derived.json.gz` | Precomputed taxonomy tree and top Pfam/KO terms |
+| `metadata.csv.zst` | 4,690 samples — the master table |
+| `chord.csv.zst` | Category × feature-class matrix |
+| `amr-rgi-consensus.csv.zst` | Resistance gene calls |
+| `cazyme.csv.zst` | Carbohydrate-active enzymes |
+| `amp_all.csv.zst`, `acp_all.csv.zst` | Peptide predictions |
+| `cctyper.csv.zst` | CRISPR-Cas systems |
+| `gfpr.derived.json.zst` | Precomputed taxonomy tree, top Pfam/KO terms, per-run KO digest |
+| `family_assigned.csv.zst` | Contig host taxonomy (69 MB raw) |
+| `merged_pfam_kofam.csv.zst` | Pfam/KOfam terms per contig (319 MB raw, 5.5M rows) |
 
-`Run_ID` in `metadata.csv.gz` is the key every other table joins on.
+`Run_ID` in `metadata.csv.zst` is the key every other table joins on.
 
-### Optional: gene-level annotations
+### Why zstd
 
-Two source files are too large to distribute here (`family_assigned.csv`,
-69 MB; `merged_pfam_kofam.csv`, 319 MB). Without them everything works except
-the host-taxonomy rows and the per-sample Pfam/KO term lists. To add them,
-place both in `backend/data/` and run:
+Every file is read as a stream and decompressed in flight — nothing is ever
+expanded onto disk. Measured on `merged_pfam_kofam.csv`, zstd -19 stores it in
+0.093 of its raw size against gzip's 0.172, while decompressing *faster* than
+gzip; brotli-11 matches the ratio but reads more slowly, and xz -9e is 6%
+smaller for roughly 4× the decompression cost plus a native dependency. zstd
+is built into Node 22, so there is nothing to install.
+
+`.gz`, `.br` and plain files are still recognised — a plain `.csv` wins over
+every compressed form, so you can drop an uncompressed file in without
+renaming anything.
+
+### The two heavy tables
+
+`family_assigned.csv` and `merged_pfam_kofam.csv` are shipped compressed
+(~33 MB together) but are **not** imported into SQLite by default: as tables
+they cost about 520 MB, which would more than double the Docker image.
+
+Instead the sample page reads its Pfam/KO term lists from the digest in
+`gfpr.derived.json.zst`, and their exports stream straight out of the `.zst`
+files. Those exports carry the source files' own column names (`RunID`,
+`Contig`, …), which `MANIFEST.txt` notes.
+
+To import them into the database anyway — which makes exports use the database
+and its column names — run:
 
 ```bash
 npm run import-annotations   # builds backend/data/gfpr.db (~500 MB)
-npm run build-derived        # regenerates gfpr.derived.json.gz
+npm run build-derived        # regenerates gfpr.derived.json.zst
 ```
 
-Then uncomment the `volumes:` block in `docker-compose.yml` to mount the
-database into the container.
+The container does not need this; `docker-compose.yml` still has a commented
+`volumes:` block if you want to mount a full database into it.
 
 ## Configuration
 
@@ -109,7 +131,7 @@ No configuration is required. To change something, copy
 
 ```
 backend/
-  data/                  gzipped source tables
+  data/                  zstd-compressed source tables
   src/
     config/              paths, country table, annotation registry
     data/                cached loaders

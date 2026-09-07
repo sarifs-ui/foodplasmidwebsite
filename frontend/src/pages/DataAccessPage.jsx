@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Download, Search, X } from "lucide-react";
 
 import { apiPostDownload } from "../api/client.js";
 import { useApi, useDebounced } from "../api/useApi.js";
+import { ColumnPicker } from "../components/ui/ColumnPicker.jsx";
 import { FilterChip } from "../components/ui/FilterChip.jsx";
 import { ErrorBlock, LoadingBlock, SectionTitle } from "../components/ui/index.jsx";
 import {
@@ -11,6 +12,13 @@ import {
   annotationLabel,
 } from "../domain/annotations.js";
 import { categoryColor, categoryLabel } from "../domain/categories.js";
+import {
+  DEFAULT_VISIBLE_KEYS,
+  METADATA_COLUMNS,
+  parseColumnParam,
+  renderCell,
+  serializeColumns,
+} from "../domain/metadataColumns.jsx";
 import { formatCount } from "../lib/format.js";
 import { COLORS, FONT_BODY, FONT_MONO } from "../theme/tokens.js";
 
@@ -23,17 +31,6 @@ const MULTI_FILTERS = [
   { param: "subtype", label: "Subtype", optionsKey: "subtypes" },
   { param: "country", label: "Country", optionsKey: "countries" },
   { param: "year", label: "Year", optionsKey: "years" },
-];
-
-/** Table columns, in display order. `sort` is the key the API accepts. */
-const COLUMNS = [
-  { key: "id", label: "ID", sort: "id", mono: true },
-  { key: "category", label: "Category", sort: "category" },
-  { key: "type", label: "Type", sort: "type" },
-  { key: "subtype", label: "Subtype", sort: "subtype" },
-  { key: "country", label: "Country", sort: "country" },
-  { key: "year", label: "Year", sort: "year", mono: true },
-  { key: "contigs", label: "Plasmid Contigs", sort: "contigs", mono: true, align: "right" },
 ];
 
 const FERMENT_OPTIONS = [
@@ -148,10 +145,42 @@ export function DataAccessPage() {
     [searchParams, setSearchParams, sortKey, sortOrder]
   );
 
+  // Column choice rides in the URL like every other bit of view state, so a
+  // link carries the columns it was shared with.
+  const visibleKeys = useMemo(
+    () => parseColumnParam(searchParams.get("cols")),
+    [searchParams]
+  );
+  const visibleColumns = useMemo(
+    () => METADATA_COLUMNS.filter((c) => visibleKeys.includes(c.key)),
+    [visibleKeys]
+  );
+
+  /**
+   * Unlike a filter change this must NOT reset the page: showing one more
+   * column does not change which rows match, so the reader stays where they
+   * were.
+   */
+  const applyColumns = useCallback(
+    (keys) => {
+      const next = new URLSearchParams(searchParams);
+      const value = serializeColumns(keys);
+      if (value) next.set("cols", value);
+      else next.delete("cols");
+      setSearchParams(next, { preventScrollReset: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
   const clearAll = useCallback(() => {
     setSearchInput("");
-    setSearchParams(new URLSearchParams(), { preventScrollReset: true });
-  }, [setSearchParams]);
+    // The column choice is not a filter — clearing the query should not also
+    // take away the columns the reader picked.
+    const next = new URLSearchParams();
+    const cols = searchParams.get("cols");
+    if (cols) next.set("cols", cols);
+    setSearchParams(next, { preventScrollReset: true });
+  }, [searchParams, setSearchParams]);
 
   const activeFilterCount = MULTI_FILTERS.reduce(
     (sum, { param }) => sum + searchParams.getAll(param).length,
@@ -173,6 +202,9 @@ export function DataAccessPage() {
 
   const allOnPageSelected =
     results.length > 0 && results.every((r) => selectedIds.includes(r.id));
+
+  // The export mirrors the table: whatever is on screen is what lands in the CSV.
+  const exportColumns = visibleColumns.map((c) => c.exportKey);
 
   const runExport = async (annotations, key) => {
     setExportingKey(key);
@@ -196,7 +228,7 @@ export function DataAccessPage() {
         "/api/downloads/export",
         {
           runIds: selectedIds,
-          include: { metadata: true, annotations },
+          include: { metadata: true, metadataColumns: exportColumns, annotations },
         },
         "gfpr-export.zip",
         { onProgress: report }
@@ -225,7 +257,7 @@ export function DataAccessPage() {
         <SectionTitle
           eyebrow="Data Access"
           title="Browse the sample catalogue"
-          subtitle="Filter by category, type, subtype, fermentation status, country and year. Select rows to export just those samples, or export the whole catalogue."
+          subtitle="Filter by category, type, subtype, fermentation status, country and year, and choose which metadata columns to show. Select rows to export just those samples, or export the whole catalogue."
         />
 
         {filterOptions && (
@@ -276,6 +308,13 @@ export function DataAccessPage() {
               })}
             </div>
 
+            <ColumnPicker
+              columns={METADATA_COLUMNS}
+              visible={visibleKeys}
+              onApply={applyColumns}
+              onReset={() => applyColumns(DEFAULT_VISIBLE_KEYS)}
+            />
+
             <div className="relative flex-1 min-w-[200px]">
               <Search
                 size={14}
@@ -321,7 +360,7 @@ export function DataAccessPage() {
             {sortKey && (
               <>
                 {" · sorted by "}
-                {COLUMNS.find((c) => c.sort === sortKey)?.label}
+                {METADATA_COLUMNS.find((c) => c.sort === sortKey)?.label}
                 {sortOrder === "desc" ? " ↓" : " ↑"}
               </>
             )}
@@ -396,12 +435,17 @@ export function DataAccessPage() {
         )}
 
         {selectedIds.length === 0 && (
-          <p className="text-xs mb-3" style={{ color: COLORS.inkSoft }}>
+          <p className="text-xs mb-1" style={{ color: COLORS.inkSoft }}>
             Nothing selected — an export will include the entire catalogue. With every
             annotation table that is about a 55 MB archive (~340 MB of CSV), and takes
             some seconds to build.
           </p>
         )}
+        <p className="text-xs mb-3" style={{ color: COLORS.inkSoft }}>
+          The exported metadata.csv holds the{" "}
+          {exportColumns.length === 1 ? "column" : `${exportColumns.length} columns`} shown
+          below — use <strong>Columns</strong> to change them.
+        </p>
         {exportError && <ErrorBlock message={exportError} />}
 
         {error ? (
@@ -431,8 +475,8 @@ export function DataAccessPage() {
                       style={{ accentColor: COLORS.orange }}
                     />
                   </th>
-                  {COLUMNS.map((column) => {
-                    const isSorted = sortKey === column.sort;
+                  {visibleColumns.map((column) => {
+                    const isSorted = Boolean(column.sort) && sortKey === column.sort;
                     return (
                       <th
                         key={column.key}
@@ -448,23 +492,27 @@ export function DataAccessPage() {
                           column.align === "right" ? "text-right" : "text-left"
                         }`}
                       >
-                        <button
-                          type="button"
-                          onClick={() => toggleSort(column.sort)}
-                          title={`Sort by ${column.label}`}
-                          className={`inline-flex items-center gap-1 hover:underline ${
-                            column.align === "right" ? "flex-row-reverse" : ""
-                          }`}
-                          style={{ color: "#fff", opacity: isSorted ? 1 : 0.85 }}
-                        >
-                          {column.label}
-                          {isSorted &&
-                            (sortOrder === "asc" ? (
-                              <ChevronUp size={12} aria-hidden="true" />
-                            ) : (
-                              <ChevronDown size={12} aria-hidden="true" />
-                            ))}
-                        </button>
+                        {column.sort ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(column.sort)}
+                            title={`Sort by ${column.label}`}
+                            className={`inline-flex items-center gap-1 hover:underline ${
+                              column.align === "right" ? "flex-row-reverse" : ""
+                            }`}
+                            style={{ color: "#fff", opacity: isSorted ? 1 : 0.85 }}
+                          >
+                            {column.label}
+                            {isSorted &&
+                              (sortOrder === "asc" ? (
+                                <ChevronUp size={12} aria-hidden="true" />
+                              ) : (
+                                <ChevronDown size={12} aria-hidden="true" />
+                              ))}
+                          </button>
+                        ) : (
+                          <span style={{ opacity: 0.85 }}>{column.label}</span>
+                        )}
                       </th>
                     );
                   })}
@@ -491,48 +539,39 @@ export function DataAccessPage() {
                         style={{ accentColor: COLORS.orange }}
                       />
                     </td>
-                    <td className="px-3 py-2">
-                      {/* One focusable control per row, rather than a click
-                          handler on every cell. */}
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/samples/${row.id}`)}
-                        className="font-medium hover:underline"
-                        style={{ color: COLORS.darkTeal, fontFamily: FONT_MONO }}
-                      >
-                        {row.id}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: categoryColor(row.category) }}
-                        />
-                        {categoryLabel(row.category)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2" style={{ color: COLORS.inkSoft }}>
-                      {row.type || "—"}
-                    </td>
-                    <td className="px-3 py-2" style={{ color: COLORS.inkSoft }}>
-                      {row.subtype || "—"}
-                    </td>
-                    <td className="px-3 py-2">{row.countryName || row.country || "—"}</td>
-                    <td className="px-3 py-2" style={{ fontFamily: FONT_MONO }}>
-                      {row.year || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right" style={{ fontFamily: FONT_MONO }}>
-                      {row.sizeContigs === null || row.sizeContigs === undefined
-                        ? "—"
-                        : formatCount(row.sizeContigs)}
-                    </td>
+                    {visibleColumns.map((column) =>
+                      column.key === "id" ? (
+                        <td key={column.key} className="px-3 py-2">
+                          {/* One focusable control per row, rather than a click
+                              handler on every cell. */}
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/samples/${row.id}`)}
+                            className="font-medium hover:underline"
+                            style={{ color: COLORS.darkTeal, fontFamily: FONT_MONO }}
+                          >
+                            {row.id}
+                          </button>
+                        </td>
+                      ) : (
+                        <td
+                          key={column.key}
+                          className={`px-3 py-2 ${column.align === "right" ? "text-right" : ""}`}
+                          style={{
+                            fontFamily: column.mono ? FONT_MONO : undefined,
+                            color: column.muted ? COLORS.inkSoft : undefined,
+                          }}
+                        >
+                          {renderCell(column, row)}
+                        </td>
+                      )
+                    )}
                   </tr>
                 ))}
                 {results.length === 0 && (
                   <tr>
                     <td
-                      colSpan={COLUMNS.length + 1}
+                      colSpan={visibleColumns.length + 1}
                       className="px-3 py-10 text-center text-sm"
                       style={{ color: COLORS.inkSoft }}
                     >

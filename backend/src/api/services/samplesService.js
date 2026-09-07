@@ -16,13 +16,22 @@ const MAX_HITS = 200;
  */
 const SORT_FIELDS = {
   id: { get: (r) => r.run_id, type: "text" },
+  projectId: { get: (r) => r.project_id, type: "text" },
+  biosampleId: { get: (r) => r.biosample_id, type: "text" },
+  sampleAcc: { get: (r) => r.sample_acc, type: "text" },
   category: { get: (r) => r.category, type: "text" },
   type: { get: (r) => r.type, type: "text" },
   subtype: { get: (r) => r.sub_type, type: "text" },
+  // Booleans compare as numbers so non-fermented sorts before fermented, with
+  // the unknowns falling to the end like every other empty value.
+  fermented: { get: (r) => (r.fermented === null ? null : Number(r.fermented)), type: "number" },
   country: { get: (r) => countryName(r.country), type: "text" },
   // year_start keeps ranges like "2014/2015" in chronological order.
   year: { get: (r) => r.year_start, type: "number" },
+  databaseOrigin: { get: (r) => r.database_origin, type: "text" },
   contigs: { get: (r) => r.plasmid_contig_counts, type: "number" },
+  classified: { get: (r) => r.classified, type: "number" },
+  unclassified: { get: (r) => r.unclassified, type: "number" },
 };
 
 /**
@@ -56,10 +65,19 @@ function toArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
-/** Shape a stored record for the samples table. */
+/**
+ * Shape a stored record for the samples table.
+ *
+ * Every column the browser can choose to display is sent on every row. The
+ * payload is one page — 25 rows — so sending the fields the user has hidden
+ * costs a few kB and saves a refetch each time a column is switched on.
+ */
 function toListRow(record) {
   return {
     id: record.run_id,
+    projectId: record.project_id,
+    biosampleId: record.biosample_id,
+    sampleAcc: record.sample_acc,
     category: record.category,
     type: record.type,
     subtype: record.sub_type,
@@ -67,8 +85,10 @@ function toListRow(record) {
     countryName: countryName(record.country),
     year: record.year,
     fermented: record.fermented,
+    databaseOrigin: record.database_origin,
     sizeContigs: record.plasmid_contig_counts,
-    host: loadDerived().hostByRun[record.run_id] ?? null,
+    classified: record.classified,
+    unclassified: record.unclassified,
   };
 }
 
@@ -161,6 +181,7 @@ export function getFilterOptions() {
 function getAnnotations(runId) {
   const derived = loadDerived();
   const pfamKoCounts = derived.pfamKoCountsByRun[runId];
+  const pfamKoHits = derived.pfamKoHitsByRun[runId];
 
   const entries = ANNOTATIONS.map((annotation) => {
     const base = {
@@ -171,14 +192,23 @@ function getAnnotations(runId) {
     };
 
     if (!tableExists(annotation.table)) {
-      // pfam/KO counts survive without the heavy table.
+      // pfam/KO survives without the heavy table: the count and the term list
+      // both come from the derived artifact, which carries a per-run digest.
       if (annotation.key === "pfam_ko" && pfamKoCounts) {
         return {
           ...base,
           available: false,
-          count: pfamKoCounts[1] || 0,
-          hits: [],
-          note: "Term list requires the full annotation database.",
+          // Index 2 is the run's total row count, matching what the SQLite
+          // branch below reports. Older artifacts only carried the first two
+          // entries, so fall back to the KO-row count for those.
+          count: pfamKoCounts[2] ?? pfamKoCounts[1] ?? 0,
+          hits: pfamKoHits ?? [],
+          // Keyed on the digest being absent, not on it being empty: a run
+          // that genuinely has no KO terms is answered, not apologised for.
+          // Only an artifact built before the digest existed gets the note.
+          ...(pfamKoHits === undefined
+            ? { note: "Term list requires the full annotation database." }
+            : {}),
         };
       }
       return { ...base, available: false, count: 0, hits: [] };

@@ -22,15 +22,21 @@ npm-debug.log*
 ~$*
 *:Zone.Identifier
 
-# backend/data holds several hundred megabytes of optional source files and a
-# generated database. Only the small gzipped tables the image needs get through.
+# backend/data holds several hundred megabytes of raw source files and a
+# generated database. Only the compressed tables the image needs get through.
 # (Docker's matcher requires the dir/* + !dir/file form.)
+#
+# The two heavy sources are included in their zstd form: ~33 MB, against the
+# ~520 MB their SQLite tables would add. The image serves their exports by
+# streaming straight out of these files.
 backend/data/*
-!backend/data/metadata.csv.gz
-!backend/data/chord.csv.gz
-!backend/data/amr-rgi-consensus.csv.gz
-!backend/data/cazyme.csv.gz
-!backend/data/amp_all.csv.gz
-!backend/data/cctyper.csv.gz
-!backend/data/acp_all.csv.gz
-!backend/data/gfpr.derived.json.gz
+!backend/data/metadata.csv.zst
+!backend/data/chord.csv.zst
+!backend/data/amr-rgi-consensus.csv.zst
+!backend/data/cazyme.csv.zst
+!backend/data/amp_all.csv.zst
+!backend/data/cctyper.csv.zst
+!backend/data/acp_all.csv.zst
+!backend/data/gfpr.derived.json.zst
+!backend/data/family_assigned.csv.zst
+!backend/data/merged_pfam_kofam.csv.zst

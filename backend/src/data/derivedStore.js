@@ -1,14 +1,14 @@
 import fs from "node:fs";
-import zlib from "node:zlib";
 
 import { DERIVED_PATH } from "../config/paths.js";
+import { resolveCompressed } from "../ingest/lib/codec.js";
 
-/** The artifact is committed gzipped; an uncompressed file wins if present. */
+/**
+ * The artifact is committed compressed (zstd; .br and .gz are still read).
+ * An uncompressed file wins if present.
+ */
 function resolvePath() {
-  if (fs.existsSync(DERIVED_PATH)) return { path: DERIVED_PATH, gzipped: false };
-  const gz = `${DERIVED_PATH}.gz`;
-  if (fs.existsSync(gz)) return { path: gz, gzipped: true };
-  return null;
+  return resolveCompressed(DERIVED_PATH, (p) => fs.existsSync(p));
 }
 
 /**
@@ -28,6 +28,10 @@ const EMPTY = Object.freeze({
   taxonomy: { nodes: [], categories: [], familyCount: 0 },
   hostByRun: {},
   pfamKoCountsByRun: {},
+  // Per-run KO term lists, so the sample page can show them without the
+  // 432 MB pfam_ko table. Absent from artifacts built before this existed,
+  // which is why the default belongs here.
+  pfamKoHitsByRun: {},
   functional: { topPfamByCategory: {}, topKoByCategory: {}, runsByCategory: {} },
 });
 
@@ -55,7 +59,7 @@ export function loadDerived() {
   const resolved = resolvePath();
   try {
     const raw = fs.readFileSync(resolved.path);
-    const text = resolved.gzipped ? zlib.gunzipSync(raw) : raw;
+    const text = resolved.codec ? resolved.codec.sync(raw) : raw;
     cache = Object.freeze({ ...EMPTY, ...JSON.parse(text.toString("utf-8")) });
   } catch (err) {
     console.warn(`[derived] Could not read ${resolved.path}: ${err.message}`);
