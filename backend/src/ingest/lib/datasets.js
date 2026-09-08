@@ -54,6 +54,12 @@ export const DATASETS = {
     delimiter: ",",
     description: "Anticancer peptide predictions.",
   },
+  cgc: {
+    file: "cgc.tsv",
+    delimiter: "\t",
+    description:
+      "CAZyme Gene Clusters (CGC) with genomic coordinates and enzyme annotations.",
+  },
   hostTaxonomy: {
     file: "family_assigned.csv",
     delimiter: ",",

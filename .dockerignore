@@ -37,6 +37,8 @@ backend/data/*
 !backend/data/amp_all.csv.zst
 !backend/data/cctyper.csv.zst
 !backend/data/acp_all.csv.zst
+!backend/data/cgc.tsv.zst
+!backend/data/cgc.tsv
 !backend/data/gfpr.derived.json.zst
 !backend/data/family_assigned.csv.zst
 !backend/data/merged_pfam_kofam.csv.zst

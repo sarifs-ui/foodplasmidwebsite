@@ -43,7 +43,9 @@ export function importMetadata() {
   return { records, stats };
 }
 
+import { pathToFileURL } from "node:url";
+
 // Allow `node src/ingest/importMetadata.js` as well as programmatic use.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   importMetadata();
 }

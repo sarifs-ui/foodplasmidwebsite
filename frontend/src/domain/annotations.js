@@ -14,6 +14,7 @@ export const ANNOTATIONS = [
   { key: "crispr_cas", label: "CRISPR-Cas Systems", short: "CRISPR-Cas", tool: "CRISPRCasTyper" },
   { key: "amp", label: "Antimicrobial Peptides", short: "AMP", tool: "Macrel" },
   { key: "acp", label: "Anticancer Peptides", short: "ACP", tool: "Metapepticon" },
+  { key: "cgc", label: "CAZyme Gene Clusters", short: "CGC", tool: "easy_CGC (run_dbCAN)" },
   { key: "pfam_ko", label: "Pfam & KEGG KO", short: "Pfam/KO", tool: "eggNOG-mapper" },
 ];
 

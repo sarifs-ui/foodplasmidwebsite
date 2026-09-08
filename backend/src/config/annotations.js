@@ -59,6 +59,15 @@ export const ANNOTATIONS = [
     tier: "A",
   },
   {
+    key: "cgc",
+    table: "cgc",
+    label: "CAZyme Gene Clusters",
+    short: "CGC",
+    tool: "easy_CGC (run_dbCAN)",
+    labelColumn: "recommend_results",
+    tier: "A",
+  },
+  {
     key: "pfam_ko",
     table: "pfam_ko",
     label: "Pfam & KEGG KO",
@@ -81,16 +90,6 @@ export function annotationByKey(key) {
 }
 
 /**
- * CAZyme gene clusters were part of an earlier data release and have no source
- * file in the current one. They are surfaced as explicitly unavailable rather
- * than silently reported as zero hits.
+ * Retired annotation types surfaced as explicitly unavailable.
  */
-export const RETIRED_ANNOTATIONS = [
-  {
-    key: "cgc",
-    label: "CAZyme Gene Cluster",
-    short: "CGC",
-    tool: "easy_CGC",
-    note: "Not included in this data release.",
-  },
-];
+export const RETIRED_ANNOTATIONS = [];

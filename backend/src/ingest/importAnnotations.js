@@ -107,7 +107,9 @@ export async function importAnnotations({ includeHeavy = true } = {}) {
   return loaded;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { pathToFileURL } from "node:url";
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const includeHeavy = !process.argv.includes("--light");
   importAnnotations({ includeHeavy }).catch((err) => {
     console.error("[import] failed:", err.message);

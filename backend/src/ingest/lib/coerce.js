@@ -14,6 +14,13 @@ export function toTextOrNull(value) {
   return text;
 }
 
+/** Strand must preserve '-' for reverse and '+' for forward. */
+export function toStrand(value) {
+  if (value === undefined || value === null) return "+";
+  const text = String(value).trim();
+  return text === "-" ? "-" : "+";
+}
+
 export function toIntOrNull(value) {
   const text = toTextOrNull(value);
   if (text === null) return null;

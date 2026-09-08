@@ -254,6 +254,74 @@ function getAnnotations(runId) {
   return entries;
 }
 
+function getCgcClusters(runId) {
+  if (!tableExists("cgc")) return [];
+  try {
+    const rows = db
+      .prepare(
+        `SELECT cgc_id, gene_type, contig_id, protein_id, gene_start, gene_stop,
+                gene_strand, gene_annotation, gene_id, recommend_results,
+                substrate, tools_count, cazy_category, category,
+                cluster_start, cluster_end, length_bp
+         FROM cgc
+         WHERE run_id = ?
+         ORDER BY contig_id, cgc_id, gene_start ASC`
+      )
+      .all(runId);
+
+    if (!rows || rows.length === 0) return [];
+
+    const clustersMap = new Map();
+    for (const r of rows) {
+      const clusterKey = `${r.contig_id || "contig"}_${r.cgc_id || "cluster"}`;
+      if (!clustersMap.has(clusterKey)) {
+        clustersMap.set(clusterKey, {
+          cgcId: r.cgc_id,
+          contigId: r.contig_id,
+          clusterStart: r.cluster_start,
+          clusterEnd: r.cluster_end,
+          lengthBp: r.length_bp,
+          genes: [],
+        });
+      }
+      const cluster = clustersMap.get(clusterKey);
+      if (r.gene_start != null) {
+        if (cluster.clusterStart == null || r.gene_start < cluster.clusterStart) {
+          cluster.clusterStart = r.gene_start;
+        }
+      }
+      if (r.gene_stop != null) {
+        if (cluster.clusterEnd == null || r.gene_stop > cluster.clusterEnd) {
+          cluster.clusterEnd = r.gene_stop;
+        }
+      }
+      if (cluster.clusterStart != null && cluster.clusterEnd != null && !cluster.lengthBp) {
+        cluster.lengthBp = Math.abs(cluster.clusterEnd - cluster.clusterStart) + 1;
+      }
+
+      cluster.genes.push({
+        proteinId: r.protein_id,
+        geneId: r.gene_id,
+        geneType: r.gene_type,
+        category: r.category,
+        cazyCategory: r.cazy_category,
+        geneStart: r.gene_start,
+        geneStop: r.gene_stop,
+        geneStrand: r.gene_strand,
+        geneAnnotation: r.gene_annotation,
+        recommendResults: r.recommend_results,
+        substrate: r.substrate,
+        toolsCount: r.tools_count,
+      });
+    }
+
+    return Array.from(clustersMap.values());
+  } catch (err) {
+    console.error(`Error querying cgc for ${runId}:`, err.message);
+    return [];
+  }
+}
+
 export function getSampleById(runId) {
   const record = byRunId(runId);
   if (!record) return null;
@@ -277,5 +345,6 @@ export function getSampleById(runId) {
     unclassified: record.unclassified,
     host: loadDerived().hostByRun[record.run_id] ?? null,
     annotations: getAnnotations(record.run_id),
+    cgcClusters: getCgcClusters(record.run_id),
   };
 }

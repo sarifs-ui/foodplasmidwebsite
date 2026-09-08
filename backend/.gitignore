@@ -8,6 +8,8 @@ data/*
 !data/amp_all.csv.zst
 !data/cctyper.csv.zst
 !data/acp_all.csv.zst
+!data/cgc.tsv.zst
+!data/cgc.tsv
 !data/gfpr.derived.json.zst
 !data/family_assigned.csv.zst
 !data/merged_pfam_kofam.csv.zst

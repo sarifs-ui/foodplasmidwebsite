@@ -4,6 +4,7 @@ import { ChevronLeft, Download, ExternalLink } from "lucide-react";
 
 import { apiPostDownload } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
+import { GeneClusterTrack } from "../components/figures/GeneClusterTrack.jsx";
 import { ErrorBlock, InfoRow, LoadingBlock } from "../components/ui/index.jsx";
 import { EXPORT_ANNOTATION_KEYS } from "../domain/annotations.js";
 import { categoryColor, categoryLabel } from "../domain/categories.js";
@@ -179,6 +180,10 @@ export function SampleDetailPage() {
                 ))}
               </ul>
             </div>
+
+            {data.cgcClusters && data.cgcClusters.length > 0 && (
+              <GeneClusterTrack clusters={data.cgcClusters} />
+            )}
 
             {exportError && <ErrorBlock message={exportError} />}
 
