@@ -29,10 +29,15 @@ const CATEGORY_FULL_NAMES = {
   Sulfatase: "Sulfatase",
 };
 
+const UNANNOTATED_COLOR = "#94A3B8";
+
 export function getGeneColor(gene, index = 0) {
   const cat = gene.cazyCategory || gene.category || gene.geneType;
   if (cat && CATEGORY_COLORS[cat]) {
     return CATEGORY_COLORS[cat];
+  }
+  if (!cat) {
+    return UNANNOTATED_COLOR;
   }
   const fallback = [
     COLORS.darkTeal,
@@ -47,25 +52,34 @@ export function getGeneColor(gene, index = 0) {
   return fallback[index % fallback.length];
 }
 
-export function getGeneDisplayName(gene) {
+export function getGeneAnnotationName(gene) {
   if (gene.recommendResults && gene.recommendResults !== "-") {
     return gene.recommendResults;
   }
   if (gene.geneAnnotation && gene.geneAnnotation !== "-") {
     const parts = gene.geneAnnotation.split("|");
-    return parts[parts.length - 1] || gene.geneAnnotation;
+    const last = parts[parts.length - 1]?.trim();
+    if (last && last !== "-") return last;
   }
-  if (gene.geneType) return gene.geneType;
+  if (gene.geneType && gene.geneType !== "-") {
+    return gene.geneType;
+  }
+  return null;
+}
+
+export function getGeneDisplayName(gene) {
+  const annName = getGeneAnnotationName(gene);
+  if (annName) return annName;
   if (gene.proteinId) return gene.proteinId;
   return "Gene";
 }
 
 // SVG layout constants (compact)
 const SVG_WIDTH = 680;
-const SVG_HEIGHT = 90;
+const SVG_HEIGHT = 92;
 const MARGIN_X = 35;
 const TRACK_WIDTH = SVG_WIDTH - MARGIN_X * 2;
-const ARROW_Y = 30;
+const ARROW_Y = 28;
 const ARROW_H = 22;
 const ARROW_HEAD = 9;
 
@@ -93,7 +107,65 @@ function SingleCluster({ cluster, divider }) {
   }, [cluster.clusterEnd, genes]);
 
   const span = Math.max(1, maxCoord - minCoord);
-  const toX = (coord) => MARGIN_X + ((coord - minCoord) / span) * TRACK_WIDTH;
+  const toX = useMemo(
+    () => (coord) => MARGIN_X + ((coord - minCoord) / span) * TRACK_WIDTH,
+    [minCoord, span]
+  );
+
+  // Group and assign coordinate ticks to tiered rows to avoid overlapping labels
+  const coordinateTicks = useMemo(() => {
+    const rawTicks = [];
+    genes.forEach((g) => {
+      if (g.geneStart != null) rawTicks.push({ coord: g.geneStart, gene: g, type: "start" });
+      if (g.geneStop != null) rawTicks.push({ coord: g.geneStop, gene: g, type: "stop" });
+    });
+    rawTicks.sort((a, b) => a.coord - b.coord);
+
+    // Group adjacent boundary points within <= 5px into single combined label (e.g. 2,023 / 2,058)
+    const grouped = [];
+    rawTicks.forEach((t) => {
+      const x = toX(t.coord);
+      const prev = grouped[grouped.length - 1];
+      if (prev && Math.abs(x - prev.x) <= 5) {
+        prev.coords.push(t.coord);
+        prev.genes.push(t.gene);
+        prev.x = prev.coords.reduce((sum, c) => sum + toX(c), 0) / prev.coords.length;
+      } else {
+        grouped.push({ coords: [t.coord], x, genes: [t.gene] });
+      }
+    });
+
+    const MIN_LABEL_GAP = 28;
+    const lastXPerTier = [-Infinity, -Infinity];
+
+    return grouped.map((g) => {
+      const uniqueCoords = Array.from(new Set(g.coords));
+      const label = uniqueCoords.map((c) => c.toLocaleString("en-US")).join(" / ");
+      let tier = 0;
+      if (g.x - lastXPerTier[0] >= MIN_LABEL_GAP) {
+        tier = 0;
+        lastXPerTier[0] = g.x;
+      } else if (g.x - lastXPerTier[1] >= MIN_LABEL_GAP) {
+        tier = 1;
+        lastXPerTier[1] = g.x;
+      } else {
+        if (g.x - lastXPerTier[1] > g.x - lastXPerTier[0]) {
+          tier = 1;
+          lastXPerTier[1] = g.x;
+        } else {
+          tier = 0;
+          lastXPerTier[0] = g.x;
+        }
+      }
+      return {
+        coords: uniqueCoords,
+        label,
+        x: g.x,
+        genes: g.genes,
+        tier,
+      };
+    });
+  }, [genes, toX]);
 
   const toggleGene = (gene) =>
     setActiveGene((prev) =>
@@ -161,7 +233,7 @@ function SingleCluster({ cluster, divider }) {
             stroke="#94a3b8" strokeWidth={1.5}
           />
           <text
-            x={MARGIN_X} y={ARROW_Y - 10}
+            x={MARGIN_X} y={ARROW_Y - 9}
             textAnchor="start"
             className="text-[8px]"
             style={{ fill: COLORS.inkSoft, fontFamily: FONT_MONO }}
@@ -176,7 +248,7 @@ function SingleCluster({ cluster, divider }) {
             stroke="#94a3b8" strokeWidth={1.5}
           />
           <text
-            x={SVG_WIDTH - MARGIN_X} y={ARROW_Y - 10}
+            x={SVG_WIDTH - MARGIN_X} y={ARROW_Y - 9}
             textAnchor="end"
             className="text-[8px]"
             style={{ fill: COLORS.inkSoft, fontFamily: FONT_MONO }}
@@ -209,7 +281,11 @@ function SingleCluster({ cluster, divider }) {
               pathD = `M ${x0} ${y0} L ${x1 - head} ${y0} L ${x1} ${yMid} L ${x1 - head} ${y1} L ${x0} ${y1} Z`;
             }
 
-            const displayName = getGeneDisplayName(gene);
+            const annotationName = getGeneAnnotationName(gene);
+            const arrowLabel = annotationName || "—";
+            const tooltipTitle = annotationName
+              ? `${annotationName} (${gene.proteinId || ""}) [${gene.geneStart?.toLocaleString("en-US")} – ${gene.geneStop?.toLocaleString("en-US")} bp]`
+              : `${gene.proteinId || "Gene"} (${gene.geneStart?.toLocaleString("en-US")} – ${gene.geneStop?.toLocaleString("en-US")} bp)`;
 
             return (
               <g
@@ -226,7 +302,7 @@ function SingleCluster({ cluster, divider }) {
                   strokeWidth={isHovered ? 2 : 1}
                   opacity={isHovered ? 1 : 0.9}
                 >
-                  <title>{`${displayName} (${gene.geneStart} – ${gene.geneStop} bp)`}</title>
+                  <title>{tooltipTitle}</title>
                 </path>
 
                 {/* Gene label inside arrow */}
@@ -238,30 +314,74 @@ function SingleCluster({ cluster, divider }) {
                     className="text-[8px] font-bold select-none pointer-events-none"
                     style={{ fill: "#ffffff" }}
                   >
-                    {displayName.length > Math.floor(width / 7)
-                      ? `${displayName.slice(0, Math.max(2, Math.floor(width / 7) - 1))}…`
-                      : displayName}
+                    {arrowLabel.length > Math.floor(width / 7)
+                      ? `${arrowLabel.slice(0, Math.max(2, Math.floor(width / 7) - 1))}…`
+                      : arrowLabel}
                   </text>
                 )}
+              </g>
+            );
+          })}
 
-                {/* Coord ticks below arrow */}
+          {/* Coordinate ticks below arrows with collision avoidance */}
+          {coordinateTicks.map((tick, tIdx) => {
+            const isHovered =
+              activeGene &&
+              tick.genes.some(
+                (g) =>
+                  g.proteinId === activeGene.proteinId &&
+                  g.geneStart === activeGene.geneStart
+              );
+            const anchor =
+              tick.x < MARGIN_X + 15
+                ? "start"
+                : tick.x > SVG_WIDTH - MARGIN_X - 15
+                ? "end"
+                : "middle";
+
+            if (tick.tier === 0) {
+              return (
+                <g key={`tick_0_${tIdx}_${tick.label}`}>
+                  <line
+                    x1={tick.x}
+                    y1={ARROW_Y + ARROW_H}
+                    x2={tick.x}
+                    y2={ARROW_Y + ARROW_H + 4}
+                    stroke={isHovered ? COLORS.darkTeal : "#cbd5e1"}
+                    strokeWidth={isHovered ? 1.5 : 1}
+                  />
+                  <text
+                    x={tick.x}
+                    y={ARROW_Y + ARROW_H + 13}
+                    textAnchor={anchor}
+                    className={`text-[7px] font-mono select-none ${isHovered ? "font-bold" : ""}`}
+                    style={{ fill: isHovered ? COLORS.darkTeal : COLORS.inkSoft }}
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              );
+            }
+
+            return (
+              <g key={`tick_1_${tIdx}_${tick.label}`}>
+                <line
+                  x1={tick.x}
+                  y1={ARROW_Y + ARROW_H}
+                  x2={tick.x}
+                  y2={ARROW_Y + ARROW_H + 16}
+                  stroke={isHovered ? COLORS.darkTeal : "#cbd5e1"}
+                  strokeWidth={isHovered ? 1.5 : 1}
+                  strokeDasharray={isHovered ? "none" : "2 2"}
+                />
                 <text
-                  x={x0}
-                  y={ARROW_Y + ARROW_H + 11}
-                  textAnchor={x0 < MARGIN_X + 20 ? "start" : "middle"}
-                  className="text-[7px] font-mono select-none"
+                  x={tick.x}
+                  y={ARROW_Y + ARROW_H + 25}
+                  textAnchor={anchor}
+                  className={`text-[7px] font-mono select-none ${isHovered ? "font-bold" : ""}`}
                   style={{ fill: isHovered ? COLORS.darkTeal : COLORS.inkSoft }}
                 >
-                  {gene.geneStart?.toLocaleString("en-US")}
-                </text>
-                <text
-                  x={x1}
-                  y={ARROW_Y + ARROW_H + 11}
-                  textAnchor={x1 > SVG_WIDTH - MARGIN_X - 20 ? "end" : "middle"}
-                  className="text-[7px] font-mono select-none"
-                  style={{ fill: isHovered ? COLORS.darkTeal : COLORS.inkSoft }}
-                >
-                  {gene.geneStop?.toLocaleString("en-US")}
+                  {tick.label}
                 </text>
               </g>
             );
@@ -270,69 +390,99 @@ function SingleCluster({ cluster, divider }) {
       </div>
 
       {/* Hover detail card */}
-      {activeGene && (
-        <div
-          className="mt-1.5 p-2.5 rounded-lg border text-xs"
-          style={{ backgroundColor: COLORS.paperAlt, borderColor: COLORS.line }}
-        >
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="w-2.5 h-2.5 rounded-[2px] shrink-0"
-                style={{ backgroundColor: getGeneColor(activeGene) }}
-              />
-              <span className="font-bold" style={{ color: COLORS.ink, fontFamily: FONT_MONO }}>
-                {getGeneDisplayName(activeGene)}
-              </span>
-              {activeGene.proteinId && (
-                <span className="text-[10px] font-mono text-slate-400">
-                  ({activeGene.proteinId})
-                </span>
-              )}
-            </div>
-            <span className="font-mono text-[10px] font-medium" style={{ color: COLORS.darkTeal }}>
-              {activeGene.geneStart?.toLocaleString("en-US")} – {activeGene.geneStop?.toLocaleString("en-US")} bp
-              {" "}({activeGene.geneStrand === "-" ? "Reverse ◀" : "Forward ▶"})
-            </span>
-          </div>
+      {activeGene && (() => {
+        const activeAnnName = getGeneAnnotationName(activeGene);
+        const activeTitle = activeAnnName || activeGene.proteinId || "Gene";
+        const showProteinSubtitle =
+          activeGene.proteinId &&
+          activeAnnName &&
+          activeGene.proteinId !== activeAnnName;
+        const activeType =
+          CATEGORY_FULL_NAMES[
+            activeGene.cazyCategory || activeGene.category || activeGene.geneType
+          ] ||
+          activeGene.cazyCategory ||
+          activeGene.category ||
+          activeGene.geneType ||
+          "—";
+        const activeSubstrate =
+          activeGene.substrate && activeGene.substrate !== "-"
+            ? activeGene.substrate
+            : "—";
+        const activeAnnotation =
+          activeGene.geneAnnotation && activeGene.geneAnnotation !== "-"
+            ? activeGene.geneAnnotation
+            : "—";
+
+        return (
           <div
-            className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-1.5 pt-1.5 border-t text-[10px]"
-            style={{ borderColor: COLORS.line }}
+            className="mt-1.5 p-2.5 rounded-lg border text-xs"
+            style={{ backgroundColor: COLORS.paperAlt, borderColor: COLORS.line }}
           >
-            <div>
-              <span className="text-slate-400 block">Type</span>
-              <span className="font-medium" style={{ color: COLORS.ink }}>
-                {CATEGORY_FULL_NAMES[activeGene.cazyCategory || activeGene.category] ||
-                  activeGene.category ||
-                  activeGene.geneType ||
-                  "—"}
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-400 block">Substrate</span>
-              <span className="font-medium" style={{ color: COLORS.ink }}>
-                {activeGene.substrate && activeGene.substrate !== "-" ? activeGene.substrate : "—"}
-              </span>
-            </div>
-            <div className="col-span-2 md:col-span-1">
-              <span className="text-slate-400 block">Annotation</span>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="w-2.5 h-2.5 rounded-[2px] shrink-0"
+                  style={{ backgroundColor: getGeneColor(activeGene) }}
+                />
+                <span
+                  className="font-bold"
+                  style={{ color: COLORS.ink, fontFamily: FONT_MONO }}
+                >
+                  {activeTitle}
+                </span>
+                {showProteinSubtitle && (
+                  <span className="text-[10px] font-mono text-slate-400">
+                    ({activeGene.proteinId})
+                  </span>
+                )}
+              </div>
               <span
-                className="font-mono text-[9.5px] truncate block"
-                title={activeGene.geneAnnotation}
-                style={{ color: COLORS.ink }}
+                className="font-mono text-[10px] font-medium"
+                style={{ color: COLORS.darkTeal }}
               >
-                {activeGene.geneAnnotation || "—"}
+                {activeGene.geneStart?.toLocaleString("en-US")} –{" "}
+                {activeGene.geneStop?.toLocaleString("en-US")} bp{" "}
+                ({activeGene.geneStrand === "-" ? "Reverse ◀" : "Forward ▶"})
               </span>
+            </div>
+            <div
+              className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-1.5 pt-1.5 border-t text-[10px]"
+              style={{ borderColor: COLORS.line }}
+            >
+              <div>
+                <span className="text-slate-400 block">Type</span>
+                <span className="font-medium" style={{ color: COLORS.ink }}>
+                  {activeType}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block">Substrate</span>
+                <span className="font-medium" style={{ color: COLORS.ink }}>
+                  {activeSubstrate}
+                </span>
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <span className="text-slate-400 block">Annotation</span>
+                <span
+                  className="font-mono text-[9.5px] truncate block"
+                  title={activeAnnotation}
+                  style={{ color: COLORS.ink }}
+                >
+                  {activeAnnotation}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Gene legend */}
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
         {genes.map((g, i) => {
           const color = getGeneColor(g, i);
-          const name = getGeneDisplayName(g);
+          const annName = getGeneAnnotationName(g);
+          const name = annName || g.proteinId || `Gene ${i + 1}`;
           const cat = g.cazyCategory || g.category || g.geneType;
           return (
             <span
@@ -346,8 +496,12 @@ function SingleCluster({ cluster, divider }) {
                 style={{ backgroundColor: color }}
               />
               <span className="font-medium">{name}</span>
-              {cat && cat !== name && (
-                <span className="text-slate-400 font-mono text-[8.5px]">[{cat}]</span>
+              {cat ? (
+                cat !== name && (
+                  <span className="text-slate-400 font-mono text-[8.5px]">[{cat}]</span>
+                )
+              ) : (
+                <span className="text-slate-400 font-mono text-[8.5px]">[—]</span>
               )}
             </span>
           );

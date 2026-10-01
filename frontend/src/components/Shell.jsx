@@ -26,17 +26,21 @@ export function Masthead() {
           background: `linear-gradient(90deg, ${COLORS.darkTeal}F5 0%, ${COLORS.darkTeal}DB 30%, ${COLORS.deepOrange}66 58%, transparent 92%)`,
         }}
       />
-      <div className="relative z-10 w-full px-6 md:px-12 pt-16 pb-14 md:pt-20 md:pb-16 text-left">
+      <div className="relative z-10 w-full px-6 md:px-12 pt-14 pb-12 md:pt-16 md:pb-14 text-left">
         <h1
-          className="uppercase text-5xl md:text-7xl font-extrabold leading-[1.02] tracking-tight"
+          className="uppercase text-5xl md:text-7xl font-extrabold leading-none tracking-tight"
           style={{ fontFamily: FONT_DISPLAY, color: "#fff" }}
         >
-          Global Food
-          <br />
-          Plasmidome Resource
+          PLATE
         </h1>
         <p
-          className="mt-4 text-sm md:text-base tracking-wide"
+          className="mt-2 text-xl md:text-2xl font-bold tracking-tight text-white/95"
+          style={{ fontFamily: FONT_DISPLAY }}
+        >
+          Plasmid Atlas of Food Ecosystems
+        </p>
+        <p
+          className="mt-2 text-xs md:text-sm tracking-wide font-medium"
           style={{ color: COLORS.paper, fontFamily: FONT_BODY }}
         >
           Open-Source Food-Associated Plasmidome Database
@@ -94,7 +98,7 @@ export function Footer() {
       <div className="max-w-6xl mx-auto px-6 py-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="font-semibold" style={{ fontFamily: FONT_DISPLAY }}>
-            Global Food Plasmidome Resource
+            PLATE — Plasmid Atlas of Food Ecosystems
           </div>
           <p className="text-xs mt-1" style={{ color: COLORS.lightTeal }}>
             An open catalogue of plasmids from food-associated metagenomes.
@@ -116,7 +120,7 @@ export function Footer() {
             href="https://github.com/sarifs-ui/foodplasmidwebsite"
             target="_blank"
             rel="noreferrer"
-            aria-label="GFPR on GitHub"
+            aria-label="PLATE on GitHub"
             style={{ color: COLORS.paper }}
           >
             <FaGithub size={16} />
